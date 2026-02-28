@@ -134,12 +134,15 @@ def compute_cka(X: np.ndarray, Y: np.ndarray) -> float:
     Returns a score between 0 (independent) and 1 (identical).
     """
     hsic_xy = compute_hsic(X, Y)
-    hsic_xx = compute_hsic(X, X)
-    hsic_yy = compute_hsic(Y, Y)
+    hsic_xx = max(compute_hsic(X, X), 0.0)
+    hsic_yy = max(compute_hsic(Y, Y), 0.0)
     
-    if hsic_xx == 0 or hsic_yy == 0:
+    denominator = np.sqrt(hsic_xx * hsic_yy)
+    if denominator == 0.0:
         return 0.0
         
-    cka_val = hsic_xy / np.sqrt(hsic_xx * hsic_yy)
-    return float(cka_val)
+    cka_val = hsic_xy / denominator
+    
+    # Clip CKA to [-1, 1] for sanity, though standard CKA is [0, 1]
+    return float(np.clip(cka_val, -1.0, 1.0))
 

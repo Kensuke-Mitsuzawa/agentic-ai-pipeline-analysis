@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+from agentic_ai_analysis.agents.data_models import PipelineOutcome
 from agentic_ai_analysis.core.orchestrator import run_orchestration
 from agentic_ai_analysis.core.llm_client import get_embeddings
 from agentic_ai_analysis.cka.metrics import compute_cka
@@ -23,7 +24,7 @@ AGENT_NODES = [
     "agent_5_final"
 ]
 
-def save_agent_outcomes(results: List[Dict[str, Any]], output_dir: str):
+def save_agent_outcomes(results: List[PipelineOutcome], output_dir: str):
     """
     Saves the aggregated textual outcomes for each agent across all N queries 
     into separate pickle files in the output directory, as requested.
@@ -34,14 +35,14 @@ def save_agent_outcomes(results: List[Dict[str, Any]], output_dir: str):
     node_texts = {node: [] for node in AGENT_NODES}
     
     for res in results:
-        if not res.get("success", False):
-            # Pad with empty string on failure to maintain matrix shape
-            for node in AGENT_NODES:
-                node_texts[node].append("")
-            continue
-            
+        node_map = {n.node_name: n.outcome for n in res.nodes.values()}
         for node in AGENT_NODES:
-            node_texts[node].append(res.get(node, ""))
+            val = node_map.get(node, "")
+            if not str(val).strip():
+                # If truly empty (e.g. no second thought), give it a pseudo-random unique string 
+                # to prevent zero variance across the column
+                val = f"[EMPTY_NODE_{node}_{res.query_id}_{np.random.randint(1000)}]"
+            node_texts[node].append(val)
             
     # Save as separate pickle files
     for node, texts in node_texts.items():
@@ -64,9 +65,6 @@ def compute_and_visualize_cka(node_texts: Dict[str, List[str]], output_dir: str)
     logger.info("Embedding node texts...")
     for node in AGENT_NODES:
         texts = node_texts[node]
-        # Replace empty strings with a generic placeholder so embeddings model doesn't crash
-        texts = [t if str(t).strip() else "[NO OUTPUT]" for t in texts]
-        
         # Embed the batch
         vectors = embeddings_model.embed_documents(texts)
         node_embeddings[node] = np.array(vectors)
