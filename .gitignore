@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+pipeline_outcomes_*
+
+submitit_logs

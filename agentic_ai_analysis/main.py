@@ -1,7 +1,10 @@
 import os
 import pickle
 import numpy as np
+import logging
 from typing import List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 from agentic_ai_analysis.core.orchestrator import run_orchestration
 from agentic_ai_analysis.core.llm_client import get_embeddings
@@ -19,24 +22,6 @@ AGENT_NODES = [
     "agent_4_judge_distractor",
     "agent_5_final"
 ]
-
-def load_mini_dataset(n: int = 10) -> List[str]:
-    """
-    Mocking a HuggingFace ArxivQA dataset load for local prototype.
-    In real HPC deployment, this uses `datasets.load_dataset`.
-    """
-    return [
-        "What are the recent advancements in quantum error correction?",
-        "Can you explain the difference between LoRA and QLoRA for LLM fine-tuning?",
-        "How do transformers handle long context windows efficiently?",
-        "What is the principle behind Centered Kernel Alignment in neural networks?",
-        "Describe the mathematical foundation of diffusion models.",
-        "How are graph neural networks applied in drug discovery?",
-        "What are the main challenges in multi-agent reinforcement learning?",
-        "Explain the mechanism of flash attention.",
-        "How does federated learning ensure data privacy?",
-        "What is the state-of-the-art in text-to-video generation?"
-    ][:n]
 
 def save_agent_outcomes(results: List[Dict[str, Any]], output_dir: str):
     """
@@ -76,7 +61,7 @@ def compute_and_visualize_cka(node_texts: Dict[str, List[str]], output_dir: str)
     # Dictionary to store the embedded feature matrices: {node_name: np.ndarray shape (N, d)}
     node_embeddings = {}
     
-    print("Embedding node texts...")
+    logger.info("Embedding node texts...")
     for node in AGENT_NODES:
         texts = node_texts[node]
         # Replace empty strings with a generic placeholder so embeddings model doesn't crash
@@ -86,7 +71,7 @@ def compute_and_visualize_cka(node_texts: Dict[str, List[str]], output_dir: str)
         vectors = embeddings_model.embed_documents(texts)
         node_embeddings[node] = np.array(vectors)
         
-    print("Computing CKA Matrix...")
+    logger.info("Computing CKA Matrix...")
     cka_matrix = np.zeros((num_nodes, num_nodes))
     
     for i, node_i in enumerate(AGENT_NODES):
@@ -112,25 +97,23 @@ def compute_and_visualize_cka(node_texts: Dict[str, List[str]], output_dir: str)
         labels=[n.replace("agent_", "") for n in AGENT_NODES],
         output_path=heatmap_path
     )
-    print(f"Heatmap saved to {heatmap_path}")
+    logger.info(f"Heatmap saved to {heatmap_path}")
 
-def main():
-    n_queries = 5  # Small N for local prototyping
-    queries = load_mini_dataset(n=n_queries)
-    output_dir = "pipeline_outcomes"
-    
-    print(f"Starting orchestration pipeline for {n_queries} queries...")
+def run_evaluation_pipeline(queries: List[str], output_dir: str):
+    """
+    The main reusable entrypoint function.
+    Given a list of prompts/queries, evaluates them asynchronously across our multi-agent DAG 
+    and saves the metrics and node text outputs to the specified output directory.
+    """
+    logger.info(f"Starting orchestration pipeline for {len(queries)} queries...")
     # Run the DAG asynchronously across queries
     # Note: For testing locally without an LLM running, this will fail. 
     # Assumes vLLM is running locally or you mock `get_llm()`.
     results = run_orchestration(queries)
     
-    print(f"Completed {len(results)} queries. Saving outcomes...")
+    logger.info(f"Completed {len(results)} queries. Saving outcomes...")
     node_texts = save_agent_outcomes(results, output_dir)
     
-    print("Computing metrics based on outcomes...")
+    logger.info("Computing metrics based on outcomes...")
     compute_and_visualize_cka(node_texts, output_dir)
-    print("Pipeline finished successfully.")
-
-if __name__ == "__main__":
-    main()
+    logger.info(f"Pipeline finished successfully. Outputs saved to {output_dir}")
