@@ -18,6 +18,8 @@ class ResearcherNodeOutcome(BaseNodeOutcome):
 
 class PipelineOutcome(BaseModel):
 	query_id: int
+	prompt: str
+	final_outcome: str
 	success: bool
 	error: str | None
 	nodes: dict[str, Union[BaseNodeOutcome, ResearcherNodeOutcome]] = Field(description="Dictionary of node outcomes.")

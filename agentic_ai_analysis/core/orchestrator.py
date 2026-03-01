@@ -105,7 +105,9 @@ def process_single_query(query: str, query_id: int) -> Optional[data_models.Pipe
         ))
         
         return data_models.PipelineOutcome(
+            prompt=query,
             query_id=query_id,
+            final_outcome=final_answer,
             success=True,
             error=None,
             nodes={n.node_name: n for n in nodes}

@@ -16,3 +16,4 @@ submitit_logs
 *.log
 
 work_local/
+output_text.json
