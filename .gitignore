@@ -17,3 +17,4 @@ submitit_logs
 
 work_local/
 output_text.json
+.env_ljad

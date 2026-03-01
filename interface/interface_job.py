@@ -9,7 +9,7 @@ from agentic_ai_analysis.main import run_evaluation_pipeline
 from agentic_ai_analysis.core.local_server import LocalServerConfig
 from agentic_ai_analysis.core.configs_hpc import SlurmSystemConfig
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
 # 
 def main():
@@ -29,7 +29,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
     # Load .env file if it exists
-    load_dotenv(find_dotenv())
+    load_dotenv(args.env_file)
 
     config_path = Path(args.path_config)
     if not config_path.exists():

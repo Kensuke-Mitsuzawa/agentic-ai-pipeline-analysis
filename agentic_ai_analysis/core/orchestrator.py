@@ -4,8 +4,9 @@ import submitit
 import logging
 import time
 import joblib
+import math
 
-from typing import Dict, Any, List, Optional, NamedTuple
+from typing import Dict, Any, List, Optional, NamedTuple, Union, Optional
 
 # Agent imports
 from ..agents import data_models
@@ -167,87 +168,97 @@ def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
     return envelope_obj
 
 
-# task: the submitit parameters should be controlled by a config object.
+
 def run_orchestration(
     queries: List[str], 
     hpc_config: SlurmSystemConfig, 
-    profile_name: str = None) -> List[WorkerEnvelope]:
+    profile_names: Optional[List[str]] = None) -> List[Any]:
     """
-    Uses submitit to dispatch tasks.
-    In a local prototyping setting, we use the local executor. 
-    On HPC this easily scales by changing LocalExecutor to AutoExecutor.
+    Uses submitit to dispatch tasks across one or multiple heterogeneous SLURM partitions.
     """
     log_folder = hpc_config.log_folder
     log_folder.mkdir(parents=True, exist_ok=True)
     
-    profile_name = profile_name or hpc_config.default_profile
-    profile = hpc_config.profiles[profile_name]
-    
-    # task: `queries` should be chunked into smaller lists of queries.
-    # task: the chunk number is `SlurmProfile.n_nodes_budget`
-    n_chunks = profile.n_nodes_budget
-    if n_chunks > 0:
-        chunk_size = math.ceil(len(queries) / n_chunks)
-    else:
-        chunk_size = len(queries)
-        
-    if chunk_size < 1:
-        chunk_size = 1
-        
-    chunks = [queries[i:i + chunk_size] for i in range(0, len(queries), chunk_size) if len(queries[i:i + chunk_size]) > 0]
+    # Normalize profiles into a list
+    if profile_names is None:
+        profile_names = hpc_config.default_profiles
+    # end
 
-    # Using local executor for local GPU prototype
-    executor = submitit.AutoExecutor(folder=log_folder.as_posix())
-    
-    # Configure parameters. Limiting to physical cores for concurrency.
-    # task: the parameter should follow `SlurmProfile`
-    time_parts = list(map(int, profile.time.split(':')))
-    timeout_min = time_parts[0] * 60 + time_parts[1] + time_parts[2] / 60.0
-    
-    update_kwargs = {
-        "timeout_min": int(timeout_min),
-        "slurm_partition": profile.partition,
-        "slurm_nodes": 1,
-        "slurm_ntasks_per_node": profile.n_tasks_per_node,
-        "cpus_per_task": profile.n_cpus_per_task,
-        "slurm_cpus_per_task": profile.n_cpus_per_task,
-    }
-    if profile.gres:
-        update_kwargs["slurm_gres"] = profile.gres
+    profiles = [hpc_config.profiles[p] for p in profile_names]
+
+    # 1. Distribute queries proportionally across the chosen profiles based on node budget
+    total_budget = sum(p.n_nodes_budget for p in profiles)
+    if total_budget == 0: total_budget = len(profiles) # Fallback to even split
+
+    profile_query_splits = []
+    start_idx = 0
+    for p in profiles:
+        # Calculate how many queries this profile should handle
+        share = math.ceil(len(queries) * (p.n_nodes_budget / total_budget))
+        profile_query_splits.append(queries[start_idx : start_idx + share])
+        start_idx += share
+
+    all_jobs = []
+    global_query_id = 0
+
+    # 2. Setup Executors and Submit Jobs per Profile
+    for p_name, profile, assigned_queries in zip(profile_names, profiles, profile_query_splits):
+        if not assigned_queries:
+            continue
+            
+        logger.info(f"Configuring executor for partition '{p_name}' with {len(assigned_queries)} queries.")
+
+        # Initialize the specific executor
+        executor = submitit.AutoExecutor(folder=log_folder.as_posix())
         
-    executor.update_parameters(**update_kwargs)
+        time_parts = list(map(int, profile.time.split(':')))
+        timeout_min = time_parts[0] * 60 + time_parts[1] + time_parts[2] / 60.0
+        
+        update_kwargs = {
+            "timeout_min": int(timeout_min),
+            "slurm_partition": profile.partition,
+            "slurm_nodes": 1,
+            "slurm_ntasks_per_node": profile.n_tasks_per_node,
+            "cpus_per_task": profile.n_cpus_per_task,
+            "slurm_cpus_per_task": profile.n_cpus_per_task,
+        }
+        if profile.gres:
+            update_kwargs["slurm_gres"] = profile.gres
+            
+        executor.update_parameters(**update_kwargs)
 
-    # this should be the loop over the chunks.
-    # task: update the logic below. submiting a set of jobs in a chunk.    
-    # task: collect result and save it to a file, for each.
+        # Chunk the queries assigned to this specific profile
+        n_chunks = profile.n_nodes_budget
+        chunk_size = math.ceil(len(assigned_queries) / n_chunks) if n_chunks > 0 else len(assigned_queries)
+        chunk_size = max(1, chunk_size)
+            
+        chunks = [assigned_queries[i:i + chunk_size] for i in range(0, len(assigned_queries), chunk_size) if len(assigned_queries[i:i + chunk_size]) > 0]
 
+        # Submit jobs for this profile
+        for chunk_idx, chunk in enumerate(chunks):
+            # submitit.batch() is highly recommended for submitting multiple jobs quickly
+            with executor.batch():
+                for _item_chunk in chunk:
+                    _worker_func_args = WorkerFunctionArgs(
+                        query=_item_chunk,
+                        query_id=global_query_id,
+                        log_folder=log_folder,
+                        chunk_idx=chunk_idx
+                    )
+                    job = executor.submit(main_worker, _worker_func_args)
+                    all_jobs.append(job)
+                    global_query_id += 1
+                    
+        logger.info(f"Finished submitting jobs to {p_name}.")
+
+    # 3. Wait and collect results AFTER all jobs are successfully submitted to the cluster
+    logger.info(f"Waiting for all {len(all_jobs)} jobs to complete across all partitions...")
+    
     all_results = []
-
-    start_id = 0
-    for chunk_idx, chunk in enumerate(chunks):
-        jobs = []        
-        for _item_chunk in chunk:
-            _worker_func_args = WorkerFunctionArgs(
-                query=_item_chunk,
-                query_id=start_id,
-                log_folder=log_folder,
-                chunk_idx=chunk_idx
-            )
-            job = executor.submit(main_worker, _worker_func_args)
-            logger.info(f"Submitted chunk job {chunk_idx}: job_id {job.job_id}")
-            jobs.append(job)
-            start_id += 1
-        # end for
-
-        # task: saving procedure should come here.
-        for _job in jobs:
-            chunk_results = _job.result()
-            logger.info(f"collected results for job {_job.job_id}")
-
-            # Save results for each query in the chunk
-            all_results.append(chunk_results)
-            # end for
-        # end for
-    # end for
+    for _job in all_jobs:
+        # This will block until the specific job finishes
+        chunk_results = _job.result() 
+        logger.info(f"Collected results for job {_job.job_id}")
+        all_results.append(chunk_results)
     
     return all_results

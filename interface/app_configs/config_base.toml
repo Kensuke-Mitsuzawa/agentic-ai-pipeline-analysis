@@ -1,6 +1,8 @@
 [slurm_system]
 log_folder = "pipeline_outcomes_hf"
-default_profile = "default"
+
+default_profiles = ["default"]
+
 is_delete_worker_output = true
 is_download_resources_prepost = true
 is_download_resources_at_worker = false
