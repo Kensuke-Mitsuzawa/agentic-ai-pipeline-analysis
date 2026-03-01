@@ -1,7 +1,8 @@
 from pydantic import BaseModel, Field
-from typing import Dict, Any, List, Union
+from typing import Dict, Any, List, Union, Optional
 
 class BaseNodeOutcome(BaseModel):
+	node_order: int
 	node_name: str
 	execution_time_seconds: float
 	input: str
@@ -20,3 +21,7 @@ class PipelineOutcome(BaseModel):
 	success: bool
 	error: str | None
 	nodes: dict[str, Union[BaseNodeOutcome, ResearcherNodeOutcome]] = Field(description="Dictionary of node outcomes.")
+
+	def get_node_names(self) -> List[str]:
+		_set_node_obj = list(sorted(self.nodes.values(), key=lambda x: x.node_order))
+		return [n.node_name for n in _set_node_obj]

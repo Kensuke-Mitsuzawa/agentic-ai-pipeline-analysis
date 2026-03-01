@@ -5,6 +5,7 @@ from pathlib import Path
 
 from agentic_ai_analysis.main import run_evaluation_pipeline
 from agentic_ai_analysis.core.local_server import LocalServerConfig
+from agentic_ai_analysis.core.configs_hpc import SlurmSystemConfig, SlurmProfile
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +41,30 @@ def test_mini_dataset():
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype="float16")
     )
+
+    hpc_config = SlurmSystemConfig(
+        log_folder=Path("./pipeline_outcomes_mini"),
+        default_profile="local",
+        profiles={
+            "local": SlurmProfile(
+                partition="dev",
+                time="00:10:00",
+                n_nodes_budget=1,
+                n_tasks_per_node=1,
+                n_cpus_per_task=1,
+                n_gpus_per_task=1,
+                gres="gpu:1",
+                mem_per_gpu="16G",
+            )
+        }
+    )
     
     logger.info("=== Running Test Mode 1: Mini Dataset ===")
-    results = run_evaluation_pipeline(queries, output_dir, server_config=server_config)
+    results = run_evaluation_pipeline(
+        queries=queries, 
+        hpc_config=hpc_config, 
+        output_dir=output_dir, 
+        server_config=server_config)
     
     for r in results:
         assert r.success is True, f"Query {r.query_id} failed with error: {r.error}"
@@ -67,8 +89,29 @@ def test_hf_dataset(n_samples: int = 15):
         model_id="Qwen/Qwen2.5-3B-Instruct", # Super small model for fast test bootup
         port=8000
     )
+
+    hpc_config = SlurmSystemConfig(
+        log_folder=Path("./pipeline_outcomes_hf"),
+        default_profile="local",
+        profiles={
+            "local": SlurmProfile(
+                partition="dev",
+                time="00:10:00",
+                n_nodes_budget=1,
+                n_tasks_per_node=1,
+                n_cpus_per_task=1,
+                n_gpus_per_task=1,
+                gres="gpu:1",
+                mem_per_gpu="16G",
+            )
+        }
+    )
     
-    results = run_evaluation_pipeline(queries, output_dir, server_config=server_config)
+    results = run_evaluation_pipeline(
+        queries=queries, 
+        output_dir=output_dir, 
+        hpc_config=hpc_config, 
+        server_config=server_config)
     for r in results:
         assert r.success is True, f"Query {r.query_id} failed with error: {r.error}"
 

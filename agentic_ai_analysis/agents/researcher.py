@@ -11,6 +11,13 @@ from .data_models import ResearcherNodeOutcome, BaseNodeOutcome
 
 logger = logging.getLogger(__name__)
 
+PossibleNodeNmaes = [
+    "agent_2_node_a_retriever",
+    "agent_2_node_b_filter",
+    "agent_2_node_c_judge",
+    "agent_2_researcher",
+]
+
 
 class ResearcherState(TypedDict):
     user_query: str
@@ -19,12 +26,18 @@ class ResearcherState(TypedDict):
     filtered_tuples: List[Dict[str, str]]
     iteration_count: int
 
-def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome:
+
+def run_researcher(
+    user_query: str,
+    node_order: int = 0, 
+    max_depth: int = 3) -> ResearcherNodeOutcome:
     """
     Agent 2: Modular State-Machine Researcher.
     Uses Nodes A (Retriever), B (Filter), C (Judge) to iteratively
     retrieve Arxiv docs, filter signals, and decide when to stop.
     """
+    node_order_inner = 0
+
     start_time = time.perf_counter()
     llm = get_llm()
     arxiv_tool = ArxivQueryRun()
@@ -105,12 +118,14 @@ def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome
         state["raw_documents"].append(str(retrieved_docs))
         
         paired_steps.append(BaseNodeOutcome(
+            node_order=node_order_inner,
             node_name="agent_2_node_a_retriever",
             execution_time_seconds=0,
             input=current_kws_str,
             outcome=f"Query: {arxiv_query}\nDocs: {retrieved_docs}",
             args={}
         ))
+        node_order_inner += 1
         
         # Node B: Filter
         filter_chain = filter_prompt | llm
@@ -156,12 +171,14 @@ def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome
         state["raw_documents"].clear()
         
         paired_steps.append(BaseNodeOutcome(
+            node_order=node_order_inner,
             node_name="agent_2_node_b_filter",
             execution_time_seconds=0,
             input=retrieved_docs,
             outcome=filter_res, # The raw text is saved for CKA
             args={}
         ))
+        node_order_inner += 1
         
         # Node C: Judge
         filtered_data_str = json.dumps(state["filtered_tuples"], indent=2)
@@ -173,12 +190,14 @@ def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome
         logger.debug(f"Judge result: {judge_res}")
         
         paired_steps.append(BaseNodeOutcome(
+            node_order=node_order_inner,
             node_name="agent_2_node_c_judge",
             execution_time_seconds=0,
             input=filtered_data_str,
             outcome=judge_res, # Textual reasoning + label for CKA
             args={}
         ))
+        node_order_inner += 1
         
         # Control Flow & Routing Logic
         judge_lines = judge_res.split("\n")
@@ -216,6 +235,7 @@ def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome
     
     logger.debug(f"Final answer: {final_answer}")
     return ResearcherNodeOutcome(
+        node_order=node_order,
         node_name="agent_2_researcher",
         execution_time_seconds=final_execution_time,
         input=user_query,

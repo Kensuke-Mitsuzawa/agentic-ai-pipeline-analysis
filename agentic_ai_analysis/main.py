@@ -1,76 +1,39 @@
 from pathlib import Path
 import os
-import pickle
+import joblib
 import numpy as np
 import logging
 from typing import List, Dict, Any, Optional
-from agentic_ai_analysis.core.local_server import start_local_server, stop_local_server, LocalServerConfig
+from .core.local_server import start_local_server, stop_local_server, LocalServerConfig
+from .core.configs_hpc import SlurmSystemConfig
+from .agents.data_models import PipelineOutcome
+from .core.orchestrator import run_orchestration
+from .core.llm_client import get_embeddings
+from .cka.metrics import compute_cka
+from .scripts.visualize import render_cka_heatmap
+
+import pydantic
 
 logger = logging.getLogger(__name__)
 
-from agentic_ai_analysis.agents.data_models import PipelineOutcome
-from agentic_ai_analysis.core.orchestrator import run_orchestration
-from agentic_ai_analysis.core.llm_client import get_embeddings
-from agentic_ai_analysis.cka.metrics import compute_cka
-from agentic_ai_analysis.scripts.visualize import render_cka_heatmap
 
-# Agent node identifiers for the CKA matrix
-AGENT_NODES = [
-    "agent_2_node_a_retriever",
-    "agent_2_node_b_filter",
-    "agent_2_node_c_judge",
-    "agent_2_researcher", # Final output of modular loop
-    "agent_3_distractor",
-    "agent_4_judge_docs",
-    "agent_4_judge_distractor",
-    "agent_5_final"
-]
 
-def save_agent_outcomes(results: List[PipelineOutcome], output_dir: str | Path):
-    """
-    Saves the aggregated textual outcomes for each agent across all N queries 
-    into separate pickle files in the output directory, as requested.
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # We collect list of texts for each agent node
-    node_texts = {node: [] for node in AGENT_NODES}
-    
-    for res in results:
-        node_map = {n.node_name: n.outcome for n in res.nodes.values()}
-        for node in AGENT_NODES:
-            val = node_map.get(node, "")
-            if not str(val).strip():
-                # If truly empty (e.g. no second thought), give it a pseudo-random unique string 
-                # to prevent zero variance across the column
-                val = f"[EMPTY_NODE_{node}_{res.query_id}_{np.random.randint(1000)}]"
-            node_texts[node].append(val)
-        # end for
-    # end for
-    
-    # Save as separate pickle files
-    for node, texts in node_texts.items():
-        file_path = os.path.join(output_dir, f"{node}_outcomes.pkl")
-        with open(file_path, "wb") as f:
-            pickle.dump(texts, f)
-        # end with
-    # end for
-    
-    return node_texts
-
-def compute_and_visualize_cka(node_texts: Dict[str, List[str]], output_dir: Path):
+def compute_and_visualize_cka(pipeline_objects: List[PipelineOutcome], output_dir: Path):
     """
     Embeds the texts, formats the feature matrices, and computes the CKA heatmap.
     """
     embeddings_model = get_embeddings()
-    num_nodes = len(AGENT_NODES)
+    
+    _seq_n_nodes_pipeline = [len(_out.get_node_names()) for _out in pipeline_objects]
+    assert len(set(_seq_n_nodes_pipeline)) == 1, "All pipeline objects must have the same number of nodes."
+    num_nodes = _seq_n_nodes_pipeline[0]
     
     # Dictionary to store the embedded feature matrices: {node_name: np.ndarray shape (N, d)}
     node_embeddings: dict[str, np.ndarray] = {}
     
     logger.info("Embedding node texts...")
-    for node in AGENT_NODES:
-        texts = node_texts[node]
+    for node in pipeline_objects[0].get_node_names():
+        texts = [p.nodes[node].outcome for p in pipeline_objects]
         # Embed the batch
         vectors = embeddings_model.embed_documents(texts)
         node_embeddings[node] = np.array(vectors)
@@ -79,8 +42,8 @@ def compute_and_visualize_cka(node_texts: Dict[str, List[str]], output_dir: Path
     logger.info("Computing CKA Matrix...")
     cka_matrix = np.zeros((num_nodes, num_nodes))
     
-    for i, node_i in enumerate(AGENT_NODES):
-        for j, node_j in enumerate(AGENT_NODES):
+    for i, node_i in enumerate(pipeline_objects[0].get_node_names()):
+        for j, node_j in enumerate(pipeline_objects[0].get_node_names()):
             # Optimization: matrix is symmetric, diagonals are 1.0
             if i == j:
                 cka_matrix[i, j] = 1.0
@@ -102,13 +65,29 @@ def compute_and_visualize_cka(node_texts: Dict[str, List[str]], output_dir: Path
     _path_output_heatmap: Path = output_dir / "cka_heatmap.png"
     render_cka_heatmap(
         cka_matrix=cka_matrix,
-        labels=[n.replace("agent_", "") for n in AGENT_NODES],
+        labels=[n.replace("agent_", "") for n in pipeline_objects[0].get_node_names()],
         output_path=_path_output_heatmap.as_posix()
     )
     logger.info(f"Heatmap saved to {_path_output_heatmap}")
 
+
+def load_results(path_results: list[Path]) -> list[PipelineOutcome]:
+    """
+    Loads the results from the pickle files and returns a dictionary of node texts.
+    """
+    _seq_stack = []
+    for result in path_results:
+        _obj = joblib.load(result)
+        _obj_pipeline = PipelineOutcome(**_obj)
+        _seq_stack.append(_obj_pipeline)
+    # end
+    
+    return _seq_stack
+
+
 def run_evaluation_pipeline(
-    queries: List[str], 
+    queries: List[str],
+    hpc_config: SlurmSystemConfig,
     output_dir: Path,
     server_config: Optional[LocalServerConfig] = None
 ):
@@ -126,15 +105,13 @@ def run_evaluation_pipeline(
     # end if
 
     try:
-        results = run_orchestration(queries)
-        
-        logger.info(f"Completed {len(results)} queries. Saving outcomes...")
-        node_texts = save_agent_outcomes(results, output_dir)
-        
+        path_results = run_orchestration(queries, hpc_config=hpc_config)
         logger.info("Computing metrics based on outcomes...")
-        compute_and_visualize_cka(node_texts, output_dir)
+
+        pipeline_objects = load_results(path_results)
+        compute_and_visualize_cka(pipeline_objects, output_dir)
         logger.info(f"Pipeline finished successfully. Outputs saved to {output_dir}")
-        return results
+        return pipeline_objects
     finally:
         if server_config is not None:
             logger.info("Stopping local LLM server...")
