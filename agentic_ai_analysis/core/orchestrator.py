@@ -118,16 +118,15 @@ def process_single_query(query: str, query_id: int) -> Optional[data_models.Pipe
         return None
 
 
-def save_agent_outcomes(results: data_models.PipelineOutcome, output_dir: Path) -> Path:
+def save_agent_outcomes(results: data_models.PipelineOutcome, path_file: Path) -> Path:
     """
     Saves the aggregated textual outcomes for each agent across all N queries 
     into separate pickle files in the output directory, as requested.
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
+    path_file.parent.mkdir(parents=True, exist_ok=True)
     _obj = results.model_dump()
-    _path_out_file = output_dir / "results.pkl"
-    joblib.dump(_obj, _path_out_file)
-    return _path_out_file
+    joblib.dump(_obj, path_file)
+    return path_file
 
 class WorkerFunctionArgs(NamedTuple):
     query: str
@@ -145,10 +144,10 @@ class WorkerEnvelope(NamedTuple):
 def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
     result = process_single_query(args.query, args.query_id) 
     # Save results for each query in the chunk
-    out_dir = args.log_folder / f"chunk_{args.chunk_idx}"
+    path_file = args.log_folder / f"{args.query_id}_result.pkl"
     if result is not None:
-        _path_file = save_agent_outcomes(result, out_dir)
-        logger.info(f"saved results for job {out_dir}")
+        _path_file = save_agent_outcomes(result, path_file)
+        logger.info(f"saved results for job {path_file}")
         envelope_obj = WorkerEnvelope(
             args=args,
             path_results=_path_file,

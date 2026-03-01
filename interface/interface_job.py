@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 # 
 def main():
-    config_path = os.environ.get("PIPELINE_CONFIG_PATH")
-
     parser = argparse.ArgumentParser(description="Run the Agentic AI Pipeline")
     parser.add_argument('-c', "--path_config", type=str, 
                         required=True, 
@@ -33,11 +31,7 @@ def main():
     # Load .env file if it exists
     load_dotenv(find_dotenv())
 
-    if not config_path:
-        raise ValueError("PIPELINE_CONFIG_PATH environment variable is not set. Please set it "
-                         "or provide a valid .env file.")
-        
-    config_path = Path(config_path)
+    config_path = Path(args.path_config)
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found at {config_path}")
         
