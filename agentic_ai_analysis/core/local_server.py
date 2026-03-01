@@ -139,7 +139,7 @@ class LocalServerManager:
         self.process = multiprocessing.Process(
             target=_run_server,
             args=(self.config.model_dump_json(), self.error_queue),
-            daemon=True
+            daemon=False
         )
         self.process.start()
         
