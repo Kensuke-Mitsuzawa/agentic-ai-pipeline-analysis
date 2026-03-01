@@ -1,4 +1,4 @@
-from agentic_ai_analysis.core.llm_client import get_llm
+from ..core.llm_client import get_llm
 from langchain_core.prompts import PromptTemplate
 
 def run_distractor(prompt: str) -> str:

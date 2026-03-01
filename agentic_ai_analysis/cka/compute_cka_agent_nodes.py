@@ -21,15 +21,12 @@ def compute_and_visualize_cka(pipeline_objects: List[PipelineOutcome], output_di
     _seq_n_nodes_pipeline = [len(_out.get_node_names()) for _out in pipeline_objects]
     assert len(set(_seq_n_nodes_pipeline)) == 1, "All pipeline objects must have the same number of nodes."
     num_nodes = _seq_n_nodes_pipeline[0]
-
-    # task: create the dependency of nodes. The dependency must be from ealier `node_order` to later `node_order` 
-    # The `node_order` number is available at `BaseNodeOutcome`.
-    # The dependency is represented with a tuple of (node_name_from, node_name_to)
     
     dict_node_name2node_order: dict[str, int] = {}
     for node_name, node_outcome in pipeline_objects[0].nodes.items():
         dict_node_name2node_order[node_name] = node_outcome.node_order
-        
+    # end for
+    
     _sorted_nodes = sorted(pipeline_objects[0].nodes.values(), key=lambda x: x.node_order)
     
     seq_dependency: list[tuple[str, str]] = []
@@ -38,7 +35,7 @@ def compute_and_visualize_cka(pipeline_objects: List[PipelineOutcome], output_di
             seq_dependency.append((_sorted_nodes[i].node_name, _sorted_nodes[j].node_name))
         # end for
     # end for
-    
+
     # Dictionary to store the embedded feature matrices: {node_name: np.ndarray shape (N, d)}
     node_embeddings: dict[str, np.ndarray] = {}
     
