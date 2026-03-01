@@ -10,65 +10,13 @@ from .agents.data_models import PipelineOutcome
 from .core.orchestrator import run_orchestration
 from .core.llm_client import get_embeddings
 from .cka.metrics import compute_cka
+from .cka import compute_cka_agent_nodes
 from .scripts.visualize import render_cka_heatmap
 
 import pydantic
 
 logger = logging.getLogger(__name__)
 
-
-
-def compute_and_visualize_cka(pipeline_objects: List[PipelineOutcome], output_dir: Path):
-    """
-    Embeds the texts, formats the feature matrices, and computes the CKA heatmap.
-    """
-    embeddings_model = get_embeddings()
-    
-    _seq_n_nodes_pipeline = [len(_out.get_node_names()) for _out in pipeline_objects]
-    assert len(set(_seq_n_nodes_pipeline)) == 1, "All pipeline objects must have the same number of nodes."
-    num_nodes = _seq_n_nodes_pipeline[0]
-    
-    # Dictionary to store the embedded feature matrices: {node_name: np.ndarray shape (N, d)}
-    node_embeddings: dict[str, np.ndarray] = {}
-    
-    logger.info("Embedding node texts...")
-    for node in pipeline_objects[0].get_node_names():
-        texts = [p.nodes[node].outcome for p in pipeline_objects]
-        # Embed the batch
-        vectors = embeddings_model.embed_documents(texts)
-        node_embeddings[node] = np.array(vectors)
-    # end
-
-    logger.info("Computing CKA Matrix...")
-    cka_matrix = np.zeros((num_nodes, num_nodes))
-    
-    for i, node_i in enumerate(pipeline_objects[0].get_node_names()):
-        for j, node_j in enumerate(pipeline_objects[0].get_node_names()):
-            # Optimization: matrix is symmetric, diagonals are 1.0
-            if i == j:
-                cka_matrix[i, j] = 1.0
-            elif j < i:
-                cka_matrix[i, j] = cka_matrix[j, i]
-            else:
-                X = node_embeddings[node_i]
-                Y = node_embeddings[node_j]
-                score = compute_cka(X, Y)
-                cka_matrix[i, j] = score
-        # end
-    # end
-    
-    # Save the raw matrix
-    _path_output_matrix: Path = output_dir / "cka_matrix.npy"
-    np.save(_path_output_matrix, cka_matrix)
-    
-    # Render and save heatmap
-    _path_output_heatmap: Path = output_dir / "cka_heatmap.png"
-    render_cka_heatmap(
-        cka_matrix=cka_matrix,
-        labels=[n.replace("agent_", "") for n in pipeline_objects[0].get_node_names()],
-        output_path=_path_output_heatmap.as_posix()
-    )
-    logger.info(f"Heatmap saved to {_path_output_heatmap}")
 
 
 def load_results(path_results: list[Path]) -> list[PipelineOutcome]:
@@ -115,7 +63,7 @@ def run_evaluation_pipeline(
         pipeline_objects = load_results(path_results)
 
         logger.info("Computing metrics based on outcomes...")
-        compute_and_visualize_cka(pipeline_objects, output_dir)
+        compute_cka_agent_nodes.compute_and_visualize_cka(pipeline_objects, output_dir)
         logger.info(f"Pipeline finished successfully. Outputs saved to {output_dir}")
         return pipeline_objects
     finally:

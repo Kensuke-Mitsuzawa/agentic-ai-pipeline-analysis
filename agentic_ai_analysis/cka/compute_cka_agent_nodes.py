@@ -1,0 +1,82 @@
+from pathlib import Path
+import os
+import joblib
+import numpy as np
+import logging
+from typing import List, Dict, Any, Optional
+from ..core.llm_client import get_embeddings
+from ..cka.metrics import compute_cka
+from ..scripts.visualize import render_cka_heatmap
+from ..agents.data_models import PipelineOutcome
+
+logger = logging.getLogger(__name__)
+
+
+def compute_and_visualize_cka(pipeline_objects: List[PipelineOutcome], output_dir: Path):
+    """
+    Embeds the texts, formats the feature matrices, and computes the CKA heatmap.
+    """
+    embeddings_model = get_embeddings()
+    
+    _seq_n_nodes_pipeline = [len(_out.get_node_names()) for _out in pipeline_objects]
+    assert len(set(_seq_n_nodes_pipeline)) == 1, "All pipeline objects must have the same number of nodes."
+    num_nodes = _seq_n_nodes_pipeline[0]
+
+    # task: create the dependency of nodes. The dependency must be from ealier `node_order` to later `node_order` 
+    # The `node_order` number is available at `BaseNodeOutcome`.
+    # The dependency is represented with a tuple of (node_name_from, node_name_to)
+    
+    dict_node_name2node_order: dict[str, int] = {}
+    for node_name, node_outcome in pipeline_objects[0].nodes.items():
+        dict_node_name2node_order[node_name] = node_outcome.node_order
+        
+    _sorted_nodes = sorted(pipeline_objects[0].nodes.values(), key=lambda x: x.node_order)
+    
+    seq_dependency: list[tuple[str, str]] = []
+    for i in range(len(_sorted_nodes)):
+        for j in range(i, len(_sorted_nodes)):
+            seq_dependency.append((_sorted_nodes[i].node_name, _sorted_nodes[j].node_name))
+        # end for
+    # end for
+    
+    # Dictionary to store the embedded feature matrices: {node_name: np.ndarray shape (N, d)}
+    node_embeddings: dict[str, np.ndarray] = {}
+    
+    logger.info("Embedding node texts...")
+    for node in pipeline_objects[0].get_node_names():
+        texts = [p.nodes[node].outcome for p in pipeline_objects]
+        # Embed the batch
+        vectors = embeddings_model.embed_documents(texts)
+        node_embeddings[node] = np.array(vectors)
+    # end
+
+    logger.info("Computing CKA Matrix...")
+    cka_matrix = np.zeros((num_nodes, num_nodes))
+    
+    for _t_node_dep in seq_dependency:
+        _node_name_from, _node_name_to = _t_node_dep
+        _node_order_from = dict_node_name2node_order[_node_name_from]
+        _node_order_to = dict_node_name2node_order[_node_name_to]
+ 
+        _sample_X = node_embeddings[_node_name_from]
+        _sample_Y = node_embeddings[_node_name_to]
+        score = compute_cka(_sample_X, _sample_Y)
+        # Assign symmetrically since visualization masks upper triangle
+        cka_matrix[_node_order_from, _node_order_to] = score
+        cka_matrix[_node_order_to, _node_order_from] = score
+    # end
+    
+    # Save the raw matrix
+    _path_output_matrix: Path = output_dir / "cka_matrix.npy"
+    np.save(_path_output_matrix, cka_matrix)
+    
+    # Render and save heatmap
+    _path_output_heatmap: Path = output_dir / "cka_heatmap.png"
+    render_cka_heatmap(
+        cka_matrix=cka_matrix,
+        labels=[n.replace("agent_", "") for n in pipeline_objects[0].get_node_names()],
+        output_path=_path_output_heatmap.as_posix()
+    )
+    logger.info(f"Heatmap saved to {_path_output_heatmap}")
+
+    return cka_matrix
