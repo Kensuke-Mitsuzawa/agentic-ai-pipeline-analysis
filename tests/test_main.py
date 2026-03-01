@@ -33,7 +33,7 @@ def test_mini_dataset():
     output_dir = Path("./pipeline_outcomes_mini")
     
     server_config = LocalServerConfig(
-        model_id="HuggingFaceTB/SmolLM-135M", # Super small model for fast test bootup
+        model_id="Qwen/Qwen2.5-3B-Instruct", # Super small model for fast test bootup
         port=8000,
         quantization_config_dict=dict(
             load_in_4bit=True,
@@ -64,7 +64,7 @@ def test_hf_dataset(n_samples: int = 15):
     output_dir = Path("./pipeline_outcomes_hf")
     
     server_config = LocalServerConfig(
-        model_id="HuggingFaceTB/SmolLM-135M", # Super small model for fast test bootup
+        model_id="Qwen/Qwen2.5-3B-Instruct", # Super small model for fast test bootup
         port=8000
     )
     
@@ -80,7 +80,26 @@ if __name__ == "__main__":
     #                     help="Number of samples to run when using the 'hf' mode.")
     # args = parser.parse_args()
     
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    # Configure root logger to output INFO to console, and DEBUG to a file
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    
+    # Formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # Console handler (INFO and above)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    
+    # File handler (DEBUG and above)
+    file_handler = logging.FileHandler('debug.log', mode='w')
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
+    
     test_mini_dataset()
     
     # if args.mode == "mini":

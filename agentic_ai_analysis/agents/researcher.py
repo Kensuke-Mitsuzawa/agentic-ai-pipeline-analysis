@@ -1,3 +1,4 @@
+import logging
 import time
 import json
 from typing import Dict, Any, List, TypedDict
@@ -6,6 +7,10 @@ from langchain_core.prompts import PromptTemplate
 from agentic_ai_analysis.core.llm_client import get_llm
 from langchain_community.tools.arxiv.tool import ArxivQueryRun
 from .data_models import ResearcherNodeOutcome, BaseNodeOutcome
+
+
+logger = logging.getLogger(__name__)
+
 
 class ResearcherState(TypedDict):
     user_query: str
@@ -33,6 +38,7 @@ def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome
     )
     init_chain = init_extract_prompt | llm
     init_kws_str = str(init_chain.invoke({"prompt": user_query}).content).strip()
+    logger.info(f"Initial keywords: {init_kws_str}")
     
     state: ResearcherState = {
         "user_query": user_query,
@@ -51,8 +57,16 @@ def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome
         "Read the following raw documents retrieved from Arxiv:\n{docs}\n\n"
         "User Query: {user_query}\n\n"
         "Extract only information highly relevant to the user query. "
-        "Return a strictly formatted JSON list of objects, where each object has 'keyword' and 'description' keys. "
-        "Output ONLY valid JSON, e.g. [{{\"keyword\": \"...\", \"description\": \"...\"}}]."
+        "Return the output in strictly formatted XML. Provide a list of <item> elements inside a root <results> element. "
+        "Each <item> must contain a <keyword> and a <description> element.\n"
+        "Example:\n"
+        "<results>\n"
+        "  <item>\n"
+        "    <keyword>...</keyword>\n"
+        "    <description>...</description>\n"
+        "  </item>\n"
+        "</results>\n"
+        "Output ONLY valid XML without any text outside the XML block."
     )
     
     judge_prompt = PromptTemplate.from_template(
@@ -82,9 +96,12 @@ def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome
         
         try:
             retrieved_docs = arxiv_tool.invoke({"query": arxiv_query})
+            logger.debug(f"Retrieved docs: {retrieved_docs}")
         except Exception as e:
+            logger.info(f"Error retrieving docs: {str(e)}")
             retrieved_docs = f"Error retrieving docs: {str(e)}"
-            
+        # end try
+        
         state["raw_documents"].append(str(retrieved_docs))
         
         paired_steps.append(BaseNodeOutcome(
@@ -102,25 +119,39 @@ def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome
             "user_query": state["user_query"]
         }).content).strip()
         
-        # Parse JSON
-        extracted_tuples = []
+        # Parse XML
         try:
-            # Clean up potential markdown formatting from LLM JSON output
-            clean_json = filter_res
-            if clean_json.startswith("```json"):
-                clean_json = clean_json.split("```json")[1]
-            if clean_json.endswith("```"):
-                clean_json = clean_json.rsplit("```", 1)[0]
-            clean_json = clean_json.strip()
+            # Clean up potential markdown formatting from LLM XML output
+            clean_xml = filter_res
+            if "```xml" in clean_xml:
+                clean_xml = clean_xml.split("```xml", 1)[1]
+            if "```" in clean_xml:
+                clean_xml = clean_xml.rsplit("```", 1)[0]
+            clean_xml = clean_xml.strip()
             
-            extracted_tuples = json.loads(clean_json)
-            if isinstance(extracted_tuples, list):
-                for item in extracted_tuples:
-                    if "keyword" in item and "description" in item:
-                        state["filtered_tuples"].append(item)
-        except json.JSONDecodeError:
+            import xml.etree.ElementTree as ET
+            # Sometimes models return extra text, try to find the <results> block
+            start_idx = clean_xml.find("<results>")
+            end_idx = clean_xml.rfind("</results>")
+            if start_idx != -1 and end_idx != -1:
+                clean_xml = clean_xml[start_idx:end_idx + 10]
+            
+            root = ET.fromstring(clean_xml)
+            for item in root.findall('.//item'):
+                kw_node = item.find('keyword')
+                desc_node = item.find('description')
+                if kw_node is not None and desc_node is not None and kw_node.text and desc_node.text:
+                    state["filtered_tuples"].append({
+                        "keyword": kw_node.text.strip(),
+                        "description": desc_node.text.strip()
+                    })
+        except Exception as e:
+            logger.error(f"Error filtering docs: {str(e)}")
+            logger.error(f"Filter result: {filter_res}")
             pass # Or handle gracefully
-            
+        # end try
+
+        logger.debug(f"Filtered tuples: {state['filtered_tuples']}")
         # Clear raw documents after filtering to optimize context
         state["raw_documents"].clear()
         
@@ -139,6 +170,7 @@ def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome
             "user_query": state["user_query"],
             "filtered_data": filtered_data_str
         }).content).strip()
+        logger.debug(f"Judge result: {judge_res}")
         
         paired_steps.append(BaseNodeOutcome(
             node_name="agent_2_node_c_judge",
@@ -156,10 +188,13 @@ def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome
                 if "SUFFICIENT" in line and "INSUFFICIENT" not in line:
                     label = "SUFFICIENT"
                 break
-                
+            # end if
+        # end for
         if label == "SUFFICIENT":
             break
-            
+        # end if
+        
+
         # INSUFFICIENT case
         state["iteration_count"] += 1
         
@@ -172,11 +207,14 @@ def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome
                 "judge_reasoning": judge_res
             }).content).strip()
             state["search_keywords"] = [k.strip() for k in next_kws_str.split(",") if k.strip()]
-
+        # end if
+    # end while
+    
     final_execution_time = time.perf_counter() - start_time
     # The output passed to synthesizer is the accumulated filtered_tuples
-    final_answer = json.dumps(state["filtered_tuples"], indent=2)
+    final_answer = json.dumps(state["filtered_tuples"])
     
+    logger.debug(f"Final answer: {final_answer}")
     return ResearcherNodeOutcome(
         node_name="agent_2_researcher",
         execution_time_seconds=final_execution_time,

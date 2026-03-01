@@ -1,11 +1,26 @@
+from langchain_openai import ChatOpenAI
 import os
 from langchain_huggingface import HuggingFaceEndpoint, HuggingFaceEmbeddings
+from pydantic import BaseModel, Field
 
 # Using HuggingFaceEndpoint for a local vLLM or TGI server.
 # By default, assuming Mistral-7B-Instruct served on a local port (e.g., 8000).
 # The embedding model is loaded locally via HuggingFaceEmbeddings.
 
-def get_llm(base_url="http://localhost:8000/v1/", model="local-model"):
+class LlmGenerationParameters(BaseModel):
+    temperature: float = 0.7
+    max_tokens: int = 999
+    top_p: float = 0.9
+    presence_penalty: float = 0.0
+    frequency_penalty: float = 0.0
+    stop: list[str] = []
+
+
+def get_llm(
+    base_url="http://localhost:8000/v1/", 
+    model="local-model", 
+    generation_parameters: LlmGenerationParameters = LlmGenerationParameters()
+) -> ChatOpenAI:
     """
     Returns a LangChain LLM connected to a local vLLM/FastAPI OpenAI-compatible endpoint.
     If testing without a server, users can use the actual HuggingFace Hub inference API
@@ -18,8 +33,12 @@ def get_llm(base_url="http://localhost:8000/v1/", model="local-model"):
     # We use ChatOpenAI pointing to the local vLLM server since it exposes standard API
     llm = ChatOpenAI(
         model=model,
-        temperature=0.7,
-        max_tokens=256,
+        temperature=generation_parameters.temperature,
+        max_tokens=generation_parameters.max_tokens,
+        top_p=generation_parameters.top_p,
+        presence_penalty=generation_parameters.presence_penalty,
+        frequency_penalty=generation_parameters.frequency_penalty,
+        stop=generation_parameters.stop,
         openai_api_key="EMPTY",  # Local endpoint doesn't need key
         openai_api_base=base_url
     )
