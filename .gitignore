@@ -12,3 +12,5 @@ wheels/
 pipeline_outcomes_*
 
 submitit_logs
+.vscode/launch.json
+*.log
