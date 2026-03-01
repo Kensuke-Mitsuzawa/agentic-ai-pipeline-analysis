@@ -105,10 +105,16 @@ def run_evaluation_pipeline(
     # end if
 
     try:
-        path_results = run_orchestration(queries, hpc_config=hpc_config)
-        logger.info("Computing metrics based on outcomes...")
+        _seq_worker_envelopes = run_orchestration(queries, hpc_config=hpc_config)
+        _n_total_tasks = len(_seq_worker_envelopes)
+        _n_success_tasks = sum([1 for _env in _seq_worker_envelopes if _env.job_status == "success"])
+        _n_failed_tasks = _n_total_tasks - _n_success_tasks
+        logger.info(f"Total tasks: {_n_total_tasks}, Success: {_n_success_tasks}, Failed: {_n_failed_tasks}")
 
+        path_results = [_obj.path_results for _obj in _seq_worker_envelopes if _obj.path_results is not None]
         pipeline_objects = load_results(path_results)
+
+        logger.info("Computing metrics based on outcomes...")
         compute_and_visualize_cka(pipeline_objects, output_dir)
         logger.info(f"Pipeline finished successfully. Outputs saved to {output_dir}")
         return pipeline_objects

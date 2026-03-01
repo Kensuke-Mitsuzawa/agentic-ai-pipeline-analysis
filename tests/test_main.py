@@ -29,7 +29,7 @@ def load_mini_dataset(n: int = 10) -> List[str]:
 
 def test_mini_dataset():
     """Test mode 1: Test with the input from `load_mini_dataset()`"""
-    n_queries = 10  # Small N for local prototyping
+    n_queries = 2  # Small N for local prototyping
     queries = load_mini_dataset(n=n_queries)
     output_dir = Path("./pipeline_outcomes_mini")
     

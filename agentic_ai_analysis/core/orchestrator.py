@@ -5,7 +5,7 @@ import logging
 import time
 import joblib
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, NamedTuple
 
 # Agent imports
 from ..agents import data_models
@@ -118,21 +118,59 @@ def process_single_query(query: str, query_id: int) -> Optional[data_models.Pipe
         return None
 
 
-def save_agent_outcomes(results: data_models.PipelineOutcome, output_dir: Path) -> None:
+def save_agent_outcomes(results: data_models.PipelineOutcome, output_dir: Path) -> Path:
     """
     Saves the aggregated textual outcomes for each agent across all N queries 
     into separate pickle files in the output directory, as requested.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     _obj = results.model_dump()
-    joblib.dump(_obj, output_dir / "results.pkl")
+    _path_out_file = output_dir / "results.pkl"
+    joblib.dump(_obj, _path_out_file)
+    return _path_out_file
+
+class WorkerFunctionArgs(NamedTuple):
+    query: str
+    query_id: int
+    log_folder: Path
+    chunk_idx: int
+
+
+class WorkerEnvelope(NamedTuple):
+    args: WorkerFunctionArgs
+    path_results: Optional[Path]
+    job_status: str
+
+
+def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
+    result = process_single_query(args.query, args.query_id) 
+    # Save results for each query in the chunk
+    out_dir = args.log_folder / f"chunk_{args.chunk_idx}"
+    if result is not None:
+        _path_file = save_agent_outcomes(result, out_dir)
+        logger.info(f"saved results for job {out_dir}")
+        envelope_obj = WorkerEnvelope(
+            args=args,
+            path_results=_path_file,
+            job_status="success",
+        )
+    else:
+        logger.error(f"failed to process query {args.query_id}")
+        envelope_obj = WorkerEnvelope(
+            args=args,
+            path_results=None,
+            job_status="failed",
+        )
+    # end if
+    
+    return envelope_obj
 
 
 # task: the submitit parameters should be controlled by a config object.
 def run_orchestration(
     queries: List[str], 
     hpc_config: SlurmSystemConfig, 
-    profile_name: str = None) -> List[Path]:
+    profile_name: str = None) -> List[WorkerEnvelope]:
     """
     Uses submitit to dispatch tasks.
     In a local prototyping setting, we use the local executor. 
@@ -181,32 +219,34 @@ def run_orchestration(
     # this should be the loop over the chunks.
     # task: update the logic below. submiting a set of jobs in a chunk.    
     # task: collect result and save it to a file, for each.
-    jobs = []
+
     all_results = []
 
     start_id = 0
     for chunk_idx, chunk in enumerate(chunks):
+        jobs = []        
         for _item_chunk in chunk:
-            job = executor.submit(process_single_query, _item_chunk, start_id)
-            logger.info(f"Submitted chunk job {chunk_idx}: indices {start_id} to {start_id + len(chunk) - 1}")
+            _worker_func_args = WorkerFunctionArgs(
+                query=_item_chunk,
+                query_id=start_id,
+                log_folder=log_folder,
+                chunk_idx=chunk_idx
+            )
+            job = executor.submit(main_worker, _worker_func_args)
+            logger.info(f"Submitted chunk job {chunk_idx}: job_id {job.job_id}")
             jobs.append(job)
             start_id += 1
         # end for
 
         # task: saving procedure should come here.
-        for chunk_idx, job in enumerate(jobs):
-            chunk_results = job.result()
-            
+        for _job in jobs:
+            chunk_results = _job.result()
+            logger.info(f"collected results for job {_job.job_id}")
+
             # Save results for each query in the chunk
-            for res in chunk_results:
-                out_dir = log_folder / f"outcome_{res.query_id}"
-                save_agent_outcomes(res, out_dir)
-                all_results.append(out_dir)
+            all_results.append(chunk_results)
             # end for
         # end for
-        jobs = [] 
     # end for
     
-    # Wait for completion and collect results
-
     return all_results
