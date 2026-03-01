@@ -8,22 +8,23 @@ name = "agentic_ai_analysis"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "arxiv>=2.4.0",
     "datasets>=4.6.1",
-    "langchain>=1.2.10",
-    "langchain-community>=0.4.1",
+    "langchain>=1.0.0,<2",
+    "langchain-community>=0.4,<0.5",
     "langchain-core>=1.2.16",
-    "langchain-huggingface>=1.2.0",
+    "langchain-huggingface>=1.0.0,<2",
     "langchain-openai>=1.1.10",
     "langgraph>=1.0.10",
     "matplotlib>=3.10.8",
-    "numpy>=2.4.2",
+    "mmd-tst-variable-detector",
+    "numpy>=1.24.2",
     "protobuf>=7.34.0",
     "pydantic>=2.12.5",
     "scikit-learn>=1.8.0",
-    "seaborn>=0.13.2",
+    "seaborn",
     "sentence-transformers>=5.2.3",
     "submitit>=1.5.4",
     "vllm>=0.5.0.post1",
@@ -36,3 +37,6 @@ include = ["agentic_ai_analysis"]
 include = [
     "agentic_ai_analysis",
 ]
+
+[tool.uv.sources]
+mmd-tst-variable-detector = { git = "https://github.com/Kensuke-Mitsuzawa/mmd-two-sample-test-variable-selection.git" }

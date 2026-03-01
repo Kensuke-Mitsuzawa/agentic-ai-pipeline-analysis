@@ -117,7 +117,7 @@ def compute_hsic(X: np.ndarray, Y: np.ndarray) -> float:
     # 1. Compute bandwidth vectors via dimension-wise median heuristic
     sigma_X = compute_dimension_wise_median_heuristic(X)
     sigma_Y = compute_dimension_wise_median_heuristic(Y)
-    
+
     # 2. Compute Kernel Matrices
     K_X = compute_gaussian_kernel_variable_bandwidth(X, sigma_X)
     K_Y = compute_gaussian_kernel_variable_bandwidth(Y, sigma_Y)
