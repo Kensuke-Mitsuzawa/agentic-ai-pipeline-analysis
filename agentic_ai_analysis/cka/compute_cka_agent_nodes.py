@@ -5,7 +5,7 @@ import numpy as np
 import logging
 from typing import List, Dict, Any, Optional
 from ..core.llm_client import get_embeddings
-from ..cka.metrics import compute_cka
+from ..cka import metrics
 from ..scripts.visualize import render_cka_heatmap
 from ..agents.data_models import PipelineOutcome
 
@@ -57,7 +57,7 @@ def compute_and_visualize_cka(pipeline_objects: List[PipelineOutcome], output_di
  
         _sample_X = node_embeddings[_node_name_from]
         _sample_Y = node_embeddings[_node_name_to]
-        score = compute_cka(_sample_X, _sample_Y)
+        score = metrics.main(_sample_X, _sample_Y)
         # Assign symmetrically since visualization masks upper triangle
         cka_matrix[_node_order_from, _node_order_to] = score
         cka_matrix[_node_order_to, _node_order_from] = score

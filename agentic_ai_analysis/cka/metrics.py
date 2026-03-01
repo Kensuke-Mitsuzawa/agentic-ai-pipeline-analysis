@@ -54,11 +54,13 @@ class CKAwithHsicMultiLengthScaleDimKernel(BaseCKAInterface):
         # # Return float, ensuring it's not zero to avoid division by zero
         # return max(float(median_dist.item()), 1e-6)
 
-        kernel_obj = QuadraticKernelGaussianKernel(ard_weights=torch.ones(x.shape[-1]))
+        ard = torch.ones(x.shape[-1]).to(x.device)
+        kernel_obj = QuadraticKernelGaussianKernel(ard_weights=ard)
         # kernel_obj.to(x.device)
 
         tensor_length_scale = kernel_obj._get_median_dim(x, x, is_safe_guard_same_xy=False)
-        kernel_obj.bandwidth = torch.nn.Parameter(tensor_length_scale)
+        tensor_length_scale = tensor_length_scale.to(dtype=torch.float32, device=x.device)
+        kernel_obj.bandwidth = torch.nn.Parameter(tensor_length_scale, requires_grad=False)
 
         return kernel_obj
 
@@ -122,14 +124,13 @@ class CKAwithHsicMultiLengthScaleDimKernel(BaseCKAInterface):
         kernel_func_x: QuadraticKernelGaussianKernel,
         kernel_func_y: QuadraticKernelGaussianKernel,
         x: torch.Tensor, 
-        y: torch.Tensor
+        y: torch.Tensor,
     ) -> CKAResultContainer:
         """
         Computes CKA similarity: HSIC(K, L) / sqrt(HSIC(K, K) * HSIC(L, L))
         """
         # 1. Compute Kernel Matrices (N x N)
-        x = x.to(torch.float32)
-        y = y.to(torch.float32)
+
         container_K = kernel_func_x._compute_kernel_matrix_dim(x, x)
         container_L = kernel_func_y._compute_kernel_matrix_dim(y, y)
 
@@ -171,15 +172,19 @@ class CKAwithHsicMultiLengthScaleDimKernel(BaseCKAInterface):
         
         Returns a score between 0 (independent) and 1 (identical).
         """ 
-        # cka_val = hsic_xy / denominator
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        x = x.to(device)
+        y = y.to(device)
+
         kernel_func_x = self.get_median_scale(x)
         kernel_func_y = self.get_median_scale(y)
 
         cka_container = self.get_cka_value(
             kernel_func_x,
             kernel_func_y,
-            torch.from_numpy(x),
-            torch.from_numpy(y)
+            x,
+            y,
         )
 
         return cka_container
@@ -231,7 +236,10 @@ class CKAwithHsicSingleLengthScale(BaseCKAInterface):
         self,
         x: torch.Tensor, 
         y: torch.Tensor) -> CKAResultContainer:
-        device = x.device
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        x = x.to(device)
+        y = y.to(device)
+
         n_samples = x.shape[0]
 
         sigma_x = self._compute_median_heuristic(tensor_data=x)
@@ -253,19 +261,75 @@ class CKAwithHsicSingleLengthScale(BaseCKAInterface):
         
         # 4. HSIC Value
         # Trace(Kc @ Lc) = Sum(Kc * Lc)
-        hsic_val = torch.sum(Kc * Lc) / ((n_samples - 1) ** 2)
+        n_sq = (n_samples - 1) ** 2
+        hsic_xy = torch.sum(Kc * Lc) / n_sq
+        hsic_xx = torch.sum(Kc * Kc) / n_sq
+        hsic_yy = torch.sum(Lc * Lc) / n_sq
         
+        # 5. CKA Normalization (The missing step!)
+        cka_val = hsic_xy / torch.sqrt(hsic_xx * hsic_yy)        
         return CKAResultContainer(
-            cka=hsic_val.cpu().item(),
-            hsic_xy=hsic_val.cpu().item(),
-            hsic_xx=hsic_val.cpu().item(),
-            hsic_yy=hsic_val.cpu().item(),
+            cka=cka_val.cpu().item(),
+            hsic_xy=hsic_xy.cpu().item(),
+            hsic_xx=hsic_xx.cpu().item(),
+            hsic_yy=hsic_yy.cpu().item(),
             kernel_x_length_scale=np.array([sigma_x]),
             kernel_y_length_scale=np.array([sigma_y]),
             kernel_L=L.detach().cpu().numpy(),
             kernel_K=K.detach().cpu().numpy()
         )
 
+
+class CKALinear(BaseCKAInterface):
+    def compute_cka(self, x: torch.Tensor, y: torch.Tensor) -> CKAResultContainer:
+        """
+        Computes Linear CKA. 
+        x and y should be shape (N, d_x) and (N, d_y).
+        """
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        x = x.to(device)
+        y = y.to(device)
+        
+        n_samples = x.shape[0]
+
+        # 1. Linear Kernels (Dot Product)
+        K = torch.mm(x, x.t())
+        L = torch.mm(y, y.t())
+        
+        # 2. Centering Matrix H
+        H = torch.eye(n_samples, device=device) - (1.0 / n_samples) * torch.ones((n_samples, n_samples), device=device)
+        
+        K = K.to(torch.float32)
+        L = L.to(torch.float32)
+        H = H.to(torch.float32)
+
+        # 3. Centered Kernels
+        Kc = torch.mm(torch.mm(H, K), H)
+        Lc = torch.mm(torch.mm(H, L), H)
+        
+        # 4. HSIC Values
+        n_sq = (n_samples - 1) ** 2
+        hsic_xy = torch.sum(Kc * Lc) / n_sq
+        hsic_xx = torch.sum(Kc * Kc) / n_sq
+        hsic_yy = torch.sum(Lc * Lc) / n_sq
+        
+        # 5. CKA Normalization
+        cka_val = hsic_xy / torch.sqrt(hsic_xx * hsic_yy)
+        
+        res_obj = CKAResultContainer(
+            cka=cka_val.cpu().item(),
+            hsic_xy=hsic_xy.cpu().item(),
+            hsic_xx=hsic_xx.cpu().item(),
+            hsic_yy=hsic_yy.cpu().item(),
+            kernel_x_length_scale=np.array([1.0]),
+            kernel_y_length_scale=np.array([1.0]),
+            kernel_L=L.detach().cpu().numpy(),
+            kernel_K=K.detach().cpu().numpy()
+        )
+
+        return res_obj
+
+        
 
 def main(X: np.ndarray, Y: np.ndarray) -> float:
     """
@@ -276,6 +340,7 @@ def main(X: np.ndarray, Y: np.ndarray) -> float:
     Returns a score between 0 (independent) and 1 (identical).
     """ 
     # cka_obj = CKAwithHsicMultiLengthScaleDimKernel()
-    cka_obj = CKAwithHsicSingleLengthScale()
+    # cka_obj = CKAwithHsicSingleLengthScale()
+    cka_obj = CKALinear()
     cka_container = cka_obj.compute_cka(torch.from_numpy(X), torch.from_numpy(Y))
     return cka_container.cka

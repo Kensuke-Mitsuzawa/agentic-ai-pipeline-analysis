@@ -9,9 +9,7 @@ from .core.configs_hpc import SlurmSystemConfig
 from .agents.data_models import PipelineOutcome
 from .core.orchestrator import run_orchestration
 from .core.llm_client import get_embeddings
-from .cka.metrics import compute_cka
 from .cka import compute_cka_agent_nodes
-from .scripts.visualize import render_cka_heatmap
 
 import pydantic
 
