@@ -1,8 +1,10 @@
 import logging
 import argparse
 from typing import List
+from pathlib import Path
 
 from agentic_ai_analysis.main import run_evaluation_pipeline
+from agentic_ai_analysis.core.local_server import LocalServerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +28,24 @@ def load_mini_dataset(n: int = 10) -> List[str]:
 
 def test_mini_dataset():
     """Test mode 1: Test with the input from `load_mini_dataset()`"""
-    n_queries = 5  # Small N for local prototyping
+    n_queries = 10  # Small N for local prototyping
     queries = load_mini_dataset(n=n_queries)
-    output_dir = "pipeline_outcomes_mini"
+    output_dir = Path("./pipeline_outcomes_mini")
+    
+    server_config = LocalServerConfig(
+        model_id="HuggingFaceTB/SmolLM-135M", # Super small model for fast test bootup
+        port=8000,
+        quantization_config_dict=dict(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype="float16")
+    )
     
     logger.info("=== Running Test Mode 1: Mini Dataset ===")
-    run_evaluation_pipeline(queries, output_dir)
+    results = run_evaluation_pipeline(queries, output_dir, server_config=server_config)
+    
+    for r in results:
+        assert r.success is True, f"Query {r.query_id} failed with error: {r.error}"
 
 def test_hf_dataset(n_samples: int = 15):
     """Test mode 2: Test with the input from the Hugging face dataset MMInstruction/ArxivQA"""
@@ -47,9 +61,16 @@ def test_hf_dataset(n_samples: int = 15):
     
     # We use the 'question' column from the dataset as the query
     queries = dataset["question"][:n_samples]
-    output_dir = "pipeline_outcomes_hf"
+    output_dir = Path("./pipeline_outcomes_hf")
     
-    run_evaluation_pipeline(queries, output_dir)
+    server_config = LocalServerConfig(
+        model_id="HuggingFaceTB/SmolLM-135M", # Super small model for fast test bootup
+        port=8000
+    )
+    
+    results = run_evaluation_pipeline(queries, output_dir, server_config=server_config)
+    for r in results:
+        assert r.success is True, f"Query {r.query_id} failed with error: {r.error}"
 
 if __name__ == "__main__":
     # parser = argparse.ArgumentParser(description="Run the Agentic AI CKA Analysis Pipeline")

@@ -5,9 +5,9 @@ from langchain_huggingface import HuggingFaceEndpoint, HuggingFaceEmbeddings
 # By default, assuming Mistral-7B-Instruct served on a local port (e.g., 8000).
 # The embedding model is loaded locally via HuggingFaceEmbeddings.
 
-def get_llm(base_url="http://localhost:8000/v1/", model="mistralai/Mistral-7B-Instruct-v0.2"):
+def get_llm(base_url="http://localhost:8000/v1/", model="local-model"):
     """
-    Returns a LangChain LLM connected to a local vLLM/TGI OpenAI-compatible endpoint.
+    Returns a LangChain LLM connected to a local vLLM/FastAPI OpenAI-compatible endpoint.
     If testing without a server, users can use the actual HuggingFace Hub inference API
     by providing a standard HF endpoint URL and an API key.
     """
@@ -19,7 +19,7 @@ def get_llm(base_url="http://localhost:8000/v1/", model="mistralai/Mistral-7B-In
     llm = ChatOpenAI(
         model=model,
         temperature=0.7,
-        max_tokens=512,
+        max_tokens=256,
         openai_api_key="EMPTY",  # Local endpoint doesn't need key
         openai_api_base=base_url
     )

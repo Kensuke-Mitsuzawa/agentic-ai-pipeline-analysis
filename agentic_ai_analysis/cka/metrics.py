@@ -140,6 +140,7 @@ def compute_cka(X: np.ndarray, Y: np.ndarray) -> float:
     denominator = np.sqrt(hsic_xx * hsic_yy)
     if denominator == 0.0:
         return 0.0
+    # end if
         
     cka_val = hsic_xy / denominator
     

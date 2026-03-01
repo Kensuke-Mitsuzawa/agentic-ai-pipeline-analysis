@@ -1,91 +1,187 @@
 import time
-from typing import Dict, Any, List
+import json
+from typing import Dict, Any, List, TypedDict
 
 from langchain_core.prompts import PromptTemplate
 from agentic_ai_analysis.core.llm_client import get_llm
 from langchain_community.tools.arxiv.tool import ArxivQueryRun
 from .data_models import ResearcherNodeOutcome, BaseNodeOutcome
 
-def run_researcher(keywords_str: str, budget_max: int = 2) -> ResearcherNodeOutcome:
+class ResearcherState(TypedDict):
+    user_query: str
+    search_keywords: List[str]
+    raw_documents: List[str]
+    filtered_tuples: List[Dict[str, str]]
+    iteration_count: int
+
+def run_researcher(user_query: str, max_depth: int = 3) -> ResearcherNodeOutcome:
     """
-    Agent 2: Iterative Researcher.
-    Loops exactly up to `budget_max` times:
-    1. Prompts LLM with current keyword stack to form an Arxiv query.
-    2. Runs Arxiv tool to retrieve docs.
-    3. Prompts LLM to extract new 'keyword: description' pairs from documents.
-    4. Adds new keywords to the stack.
+    Agent 2: Modular State-Machine Researcher.
+    Uses Nodes A (Retriever), B (Filter), C (Judge) to iteratively
+    retrieve Arxiv docs, filter signals, and decide when to stop.
     """
     start_time = time.perf_counter()
     llm = get_llm()
     arxiv_tool = ArxivQueryRun()
+
+    # Initial Extraction (replaces standalone extract_keywords)
+    init_extract_prompt = PromptTemplate.from_template(
+        "You are a helpful academic keyword extractor. "
+        "Given the user prompt, extract the most important keywords and return ONLY a comma-separated list.\n"
+        "Do not provide any conversational text or explanation.\n\n"
+        "Prompt: {prompt}\nKeywords:"
+    )
+    init_chain = init_extract_prompt | llm
+    init_kws_str = str(init_chain.invoke({"prompt": user_query}).content).strip()
     
-    # Initialize the keyword stack from the string
-    stack_keywords = [k.strip() for k in keywords_str.split(",") if k.strip()]
+    state: ResearcherState = {
+        "user_query": user_query,
+        "search_keywords": [k.strip() for k in init_kws_str.split(",") if k.strip()],
+        "raw_documents": [],
+        "filtered_tuples": [],
+        "iteration_count": 0
+    }
     
-    # Prompts
+    # Prompts for Nodes
     query_prompt = PromptTemplate.from_template(
         "Based on these keywords: {keywords}, formulate a single concise search query for Arxiv to find the most relevant papers. Only output the query string."
     )
     
-    extraction_prompt = PromptTemplate.from_template(
-        "Read the following academic documents:\n{docs}\n\n"
-        "Extract a list of new, specific technical keywords and their descriptions from these documents. "
-        "Format each as strictly 'keyword: description'. Do not include the original keywords: {current_keywords}."
+    filter_prompt = PromptTemplate.from_template(
+        "Read the following raw documents retrieved from Arxiv:\n{docs}\n\n"
+        "User Query: {user_query}\n\n"
+        "Extract only information highly relevant to the user query. "
+        "Return a strictly formatted JSON list of objects, where each object has 'keyword' and 'description' keys. "
+        "Output ONLY valid JSON, e.g. [{{\"keyword\": \"...\", \"description\": \"...\"}}]."
     )
     
-    paired_steps = []
-    all_extracted_docs = []
+    judge_prompt = PromptTemplate.from_template(
+        "User Query: {user_query}\n\n"
+        "Current Synthesized Data:\n{filtered_data}\n\n"
+        "Evaluate if the current synthesized data contains sufficient detail to definitively answer the user's query.\n"
+        "First provide your reasoning in a 'Reasoning:' section.\n"
+        "Then, on a new line, provide a strict categorical label: 'Label: SUFFICIENT' or 'Label: INSUFFICIENT'."
+    )
     
-    # Run the iterative search loop
-    iter_i = 0
-    while iter_i < budget_max:
-        current_kws_str = ", ".join(stack_keywords)
-        
-        # 1. Form an Arxiv query
+    next_kws_prompt = PromptTemplate.from_template(
+        "The following information is insufficient to fully answer the query.\n"
+        "User Query: {user_query}\n"
+        "Current Data: {filtered_data}\n"
+        "Reasoning for insufficiency: {judge_reasoning}\n\n"
+        "Generate a comma-separated list of new keyword terms to search next to fill the gaps. "
+        "Return ONLY a comma-separated list."
+    )
+
+    paired_steps = []
+    
+    while state["iteration_count"] < max_depth:
+        # Node A: Retriever
+        current_kws_str = ", ".join(state["search_keywords"])
         query_chain = query_prompt | llm
-        arxiv_query = query_chain.invoke({"keywords": current_kws_str}).content.strip()
+        arxiv_query = str(query_chain.invoke({"keywords": current_kws_str}).content).strip()
         
-        # 2. Run the tool to retrieve documents
         try:
             retrieved_docs = arxiv_tool.invoke({"query": arxiv_query})
         except Exception as e:
             retrieved_docs = f"Error retrieving docs: {str(e)}"
             
-        all_extracted_docs.append(str(retrieved_docs))
+        state["raw_documents"].append(str(retrieved_docs))
         
-        # 3. Extract new keywords
-        extract_chain = extraction_prompt | llm
-        extraction_result = extract_chain.invoke({
-            "docs": retrieved_docs, 
-            "current_keywords": current_kws_str
-        }).content
-        
-        # Record the thought (query intent) and observation (retrieved docs + new keywords)
         paired_steps.append(BaseNodeOutcome(
-            node_name="agent_2_researcher_intermediate",
+            node_name="agent_2_node_a_retriever",
             execution_time_seconds=0,
-            input=f"Thought: I should search Arxiv for [{arxiv_query}]\nAction: Arxiv\nAction Input: {arxiv_query}",
-            outcome=f"Retrieved:\n{retrieved_docs}\n\nExtracted keywords:\n{extraction_result}",
+            input=current_kws_str,
+            outcome=f"Query: {arxiv_query}\nDocs: {retrieved_docs}",
             args={}
         ))
         
-        # 4. Parse extraction result to add to stack_keyword
-        for line in extraction_result.split("\n"):
-            line = line.strip()
-            if ":" in line and not line.startswith("Thought"):
-                new_kw = line.split(":")[0].strip().strip("-* ")
-                if new_kw and new_kw.lower() not in [k.lower() for k in stack_keywords]:
-                    stack_keywords.append(new_kw)
-                    
-        iter_i += 1
+        # Node B: Filter
+        filter_chain = filter_prompt | llm
+        filter_res = str(filter_chain.invoke({
+            "docs": state["raw_documents"][-1], 
+            "user_query": state["user_query"]
+        }).content).strip()
+        
+        # Parse JSON
+        extracted_tuples = []
+        try:
+            # Clean up potential markdown formatting from LLM JSON output
+            clean_json = filter_res
+            if clean_json.startswith("```json"):
+                clean_json = clean_json.split("```json")[1]
+            if clean_json.endswith("```"):
+                clean_json = clean_json.rsplit("```", 1)[0]
+            clean_json = clean_json.strip()
+            
+            extracted_tuples = json.loads(clean_json)
+            if isinstance(extracted_tuples, list):
+                for item in extracted_tuples:
+                    if "keyword" in item and "description" in item:
+                        state["filtered_tuples"].append(item)
+        except json.JSONDecodeError:
+            pass # Or handle gracefully
+            
+        # Clear raw documents after filtering to optimize context
+        state["raw_documents"].clear()
+        
+        paired_steps.append(BaseNodeOutcome(
+            node_name="agent_2_node_b_filter",
+            execution_time_seconds=0,
+            input=retrieved_docs,
+            outcome=filter_res, # The raw text is saved for CKA
+            args={}
+        ))
+        
+        # Node C: Judge
+        filtered_data_str = json.dumps(state["filtered_tuples"], indent=2)
+        judge_chain = judge_prompt | llm
+        judge_res = str(judge_chain.invoke({
+            "user_query": state["user_query"],
+            "filtered_data": filtered_data_str
+        }).content).strip()
+        
+        paired_steps.append(BaseNodeOutcome(
+            node_name="agent_2_node_c_judge",
+            execution_time_seconds=0,
+            input=filtered_data_str,
+            outcome=judge_res, # Textual reasoning + label for CKA
+            args={}
+        ))
+        
+        # Control Flow & Routing Logic
+        judge_lines = judge_res.split("\n")
+        label = "INSUFFICIENT"
+        for line in judge_lines:
+            if "Label:" in line:
+                if "SUFFICIENT" in line and "INSUFFICIENT" not in line:
+                    label = "SUFFICIENT"
+                break
+                
+        if label == "SUFFICIENT":
+            break
+            
+        # INSUFFICIENT case
+        state["iteration_count"] += 1
+        
+        if state["iteration_count"] < max_depth:
+            # Generate new search keywords
+            next_kws_chain = next_kws_prompt | llm
+            next_kws_str = str(next_kws_chain.invoke({
+                "user_query": state["user_query"],
+                "filtered_data": filtered_data_str,
+                "judge_reasoning": judge_res
+            }).content).strip()
+            state["search_keywords"] = [k.strip() for k in next_kws_str.split(",") if k.strip()]
 
     final_execution_time = time.perf_counter() - start_time
-    final_answer = "\n\n---\n\n".join(all_extracted_docs)
+    # The output passed to synthesizer is the accumulated filtered_tuples
+    final_answer = json.dumps(state["filtered_tuples"], indent=2)
     
     return ResearcherNodeOutcome(
         node_name="agent_2_researcher",
         execution_time_seconds=final_execution_time,
-        input=keywords_str,
+        input=user_query,
         outcome=final_answer,
+        args={},
         intermediate_steps=paired_steps
     )

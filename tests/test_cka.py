@@ -1,6 +1,10 @@
 import numpy as np
 from agentic_ai_analysis.cka.metrics import compute_cka, compute_hsic, compute_dimension_wise_median_heuristic
 
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
+
 def test_cka_identical():
     # Two identical matrices should have CKA = 1.0
     N, d = 20, 10
@@ -36,9 +40,22 @@ def test_median_heuristic():
     print(f"Median heuristic bandwidth: {bw}")
     assert np.isclose(bw[0], 1.5)
 
+
+def test_hsic():
+    import random
+    rand_gen = np.random.default_rng(42)
+    # test hsic
+    # I want to make the dependency X -> Y.
+    X = rand_gen.normal(1, 1, (100, 10))
+    Y = X + rand_gen.normal(0, 0.1, (100, 10))
+    hsic_score = compute_hsic(X, Y)
+    logger.info(f"HSIC score: {hsic_score}")
+    assert hsic_score > 0.8, f"Expected high correlation, got {hsic_score}"
+
 if __name__ == "__main__":
-    test_cka_identical()
-    test_cka_orthogonal()
-    test_cka_correlated()
-    test_median_heuristic()
-    print("All CKA tests passed!")
+    # test_cka_identical()
+    # test_cka_orthogonal()
+    # test_cka_correlated()
+    # test_median_heuristic()
+    test_hsic()
+    logger.info("All CKA tests passed!")
