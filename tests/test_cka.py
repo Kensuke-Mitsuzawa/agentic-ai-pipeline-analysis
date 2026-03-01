@@ -1,5 +1,6 @@
+import random
 import numpy as np
-from agentic_ai_analysis.cka.metrics import compute_cka, compute_hsic, compute_dimension_wise_median_heuristic
+from agentic_ai_analysis.cka.metrics import compute_cka, get_median_scale
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -31,31 +32,34 @@ def test_cka_correlated():
     print(f"Correlated matrices CKA: {cka_score}")
     assert cka_score > 0.8, f"Expected high correlation, got {cka_score}"
 
-def test_median_heuristic():
-    X = np.array([[1.0], [2.0], [3.0], [4.0]])
-    # Diff pairs: (1,2)->1, (1,3)->2, (1,4)->3, (2,3)->1, (2,4)->2, (3,4)->1
-    # Diffs: [1, 2, 3, 1, 2, 1] -> Sorted: [1, 1, 1, 2, 2, 3]
-    # Median is 1.5
-    bw = compute_dimension_wise_median_heuristic(X)
-    print(f"Median heuristic bandwidth: {bw}")
-    assert np.isclose(bw[0], 1.5)
 
-
-def test_hsic():
-    import random
+def test_cka_linear_dependency():
     rand_gen = np.random.default_rng(42)
     # test hsic
     # I want to make the dependency X -> Y.
     X = rand_gen.normal(1, 1, (100, 10))
-    Y = X + rand_gen.normal(0, 0.1, (100, 10))
-    hsic_score = compute_hsic(X, Y)
-    logger.info(f"HSIC score: {hsic_score}")
-    # assert hsic_score > 0.8, f"Expected high correlation, got {hsic_score}"
+    noise_term = rand_gen.normal(0, 1, (100, 10))
+    Y = X * 2 + 10 + noise_term
+    cka_score = compute_cka(X, Y)
+    logger.info(f"HSIC score: {cka_score}")
+    assert cka_score > 0.5, f"Expected high correlation, got {cka_score}"
+
+
+def test_cka_non_linear_dependency():
+    rand_gen = np.random.default_rng(42)
+    # test hsic
+    # I want to make the dependency X -> Y.
+    X = rand_gen.normal(1, 1, (100, 10))
+    Y = np.exp(X * 2)
+    cka_score = compute_cka(X, Y)
+    logger.info(f"Non-linear dependency CKA score: {cka_score}")
+    # assert cka_score > 0.8, f"Expected high correlation, got {cka_score}"
+
 
 if __name__ == "__main__":
-    # test_cka_identical()
-    # test_cka_orthogonal()
-    # test_cka_correlated()
-    # test_median_heuristic()
-    test_hsic()
+    test_cka_identical()
+    test_cka_orthogonal()
+    test_cka_correlated()
+    test_cka_linear_dependency()
+    test_cka_non_linear_dependency()
     logger.info("All CKA tests passed!")

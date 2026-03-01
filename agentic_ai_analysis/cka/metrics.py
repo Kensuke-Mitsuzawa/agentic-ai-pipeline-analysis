@@ -1,129 +1,118 @@
 import numpy as np
+import torch
+from mmd_tst_variable_detector import QuadraticKernelGaussianKernel
 
-def center_kernel_matrix(K: np.ndarray) -> np.ndarray:
-    """Centers the kernel matrix K."""
-    n = K.shape[0]
-    H = np.eye(n) - np.ones((n, n)) / n
-    return H @ K @ H
+def get_median_scale(x: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the median heuristic for the RBF kernel bandwidth (sigma).
+    sigma = median(||x_i - x_j||)
+    """
+    if x.dtype == torch.float16 or x.dtype == torch.bfloat16:
+        x = x.to(torch.float32)
+    # end
 
-def compute_dimension_wise_median_heuristic(X: np.ndarray) -> np.ndarray:
-    """
-    Computes the dimension-wise median heuristic for the Gaussian kernel bandwidth.
-    
-    See "E.1 Variable-wise Median Heuristic" in https://arxiv.org/pdf/2311.01537#page=15.85
-    
-    Args:
-        X: Feature matrix of shape (n_samples, n_features)
-        
-    Returns:
-        np.ndarray: Bandwidth vector of shape (n_features,)
-    """
-    n_samples, n_features = X.shape
-    bandwidths = np.zeros(n_features)
-    
-    if n_samples <= 1:
-        return np.ones(n_features)
-        
-    for d in range(n_features):
-        feature_col = X[:, d:d+1]
-        # Compute pairwise absolute differences for the d-th feature
-        diffs = np.abs(feature_col - feature_col.T)
-        
-        # We only want the upper triangle (excluding diagonal) to compute the median
-        upper_tri_indices = np.triu_indices(n_samples, k=1)
-        pairwise_distances = diffs[upper_tri_indices]
-        
-        # Median heuristic: length scale = median pairwise distance
-        median_dist = np.median(pairwise_distances)
-        
-        # Avoid zero bandwidth if all points have the same feature value
-        if median_dist == 0:
-            median_dist = 1e-6
-            
-        bandwidths[d] = median_dist
-            
-    return bandwidths
+    if torch.cuda.is_available():
+        x = x.to(device='cuda')
+    # end
 
-def compute_gaussian_kernel_variable_bandwidth(X: np.ndarray, bandwidths: np.ndarray) -> np.ndarray:
-    """
-    Computes the Gaussian kernel matrix using a variable-wise bandwidth vector.
+    # Efficient pairwise distance calculation
+    # x shape: (N, D)
+    # pdist returns the upper triangle of the distance matrix flattened
+    # dists = torch.nn.functional.pdist(x, p=2)
+    # median_dist = torch.median(dists)
     
-    K(x_i, x_j) = exp( - sum_{d=1}^D (x_i,d - x_j,d)^2 / (2 * bandwidth_d^2) )
-    """
-    n_samples, n_features = X.shape
-    K = np.zeros((n_samples, n_samples))
-    
-    for i in range(n_samples):
-        for j in range(n_samples):
-            # Squared differences scaled by bandwidths
-            diff_sq = ((X[i] - X[j]) ** 2) / (2 * (bandwidths ** 2))
-            K[i, j] = np.exp(-np.sum(diff_sq))
-            
-    return K
+    # # Return float, ensuring it's not zero to avoid division by zero
+    # return max(float(median_dist.item()), 1e-6)
 
-def center_kernel_matrix_unbiased(K: np.ndarray) -> np.ndarray:
+    kernel_obj = QuadraticKernelGaussianKernel(ard_weights=torch.ones(x.shape[-1]))
+    kernel_obj.to(x.device)
+
+    tensor_length_scale = kernel_obj._get_median_dim(x, x, is_safe_guard_same_xy=False)
+    assert tensor_length_scale is not None
+
+    return tensor_length_scale
+
+def hsic_centered(K: torch.Tensor, L: torch.Tensor) -> torch.Tensor:
     """
-    Centers the kernel matrix K and zeros the diagonal to compute unbiased HSIC.
-    Based on Song et al. (2012) - Feature Selection via Dependence Maximization.
+    Computes the Hilbert-Schmidt Independence Criterion (HSIC) 
+    using centered Gram matrices.
+    HSIC(K, L) = tr(K_c * L_c) / (n-1)^2
     """
     n = K.shape[0]
-    np.fill_diagonal(K, 0.0)
+    # Centering matrix H = I - 1/n * J
+    H = torch.eye(n, device=K.device) - (1.0 / n)
     
-    # We will just use the standard centering! CKA does not usually require unbiased HSIC.
-    H = np.eye(n) - np.ones((n, n)) / n
-    return H @ K @ H
+    # Center the kernel matrices
+    Kc = H @ K @ H
+    Lc = H @ L @ H
+    
+    # HSIC calculation
+    return torch.trace(Kc @ Lc) / ((n - 1) ** 2)
 
-def compute_unbiased_hsic(K_X: np.ndarray, K_Y: np.ndarray) -> float:
-    """
-    Computes the unbiased estimator of HSIC.
-    See Song et al. (2012) or the unbiased HSIC formulation.
-    """
-    n = K_X.shape[0]
-    if n < 4:
-        return 0.0
-        
-    np.fill_diagonal(K_X, 0.0)
-    np.fill_diagonal(K_Y, 0.0)
-    
-    # K_X @ ones
-    K_X_sum_row = np.sum(K_X, axis=1)
-    K_Y_sum_row = np.sum(K_Y, axis=1)
-    
-    term1 = np.sum(K_X * K_Y)
-    term2 = np.sum(K_X_sum_row) * np.sum(K_Y_sum_row) / ((n - 1) * (n - 2))
-    term3 = 2 * np.sum(K_X_sum_row * K_Y_sum_row) / (n - 2)
-    
-    hsic_val = (term1 + term2 - term3) / (n * (n - 3))
-    return hsic_val
 
-def compute_hsic(X: np.ndarray, Y: np.ndarray) -> float:
+def compute_rbf_kernel(x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
     """
-    Computes the empirical Hilbert-Schmidt Independence Criterion (HSIC) 
-    between two feature matrices X and Y using a Gaussian kernel with 
-    the dimension-wise median heuristic.
-    
-    Args:
-        X: Feature matrix for Agent A, shape (N, d)
-        Y: Feature matrix for Agent B, shape (N, d)
-        
-    Returns:
-        float: The HSIC value
+    Computes the ARD Gaussian RBF kernel matrix using a dimension-wise length scale vector.
+    K_ij = exp(-0.5 * || (x_i - x_j) / sigma ||^2)
     """
-    n_samples = X.shape[0]
+    # 1. Cast to float32 for CPU compatibility and numerical stability
+    if x.dtype == torch.float16 or x.dtype == torch.bfloat16:
+        x = x.to(torch.float32)
+    # end
     
-    if n_samples <= 1:
-        return 0.0
-        
-    # 1. Compute bandwidth vectors via dimension-wise median heuristic
-    sigma_X = compute_dimension_wise_median_heuristic(X)
-    sigma_Y = compute_dimension_wise_median_heuristic(Y)
+    if sigma.dtype in [torch.float16, torch.bfloat16]:
+        sigma = sigma.to(torch.float32)
+    # end
 
-    # 2. Compute Kernel Matrices
-    K_X = compute_gaussian_kernel_variable_bandwidth(X, sigma_X)
-    K_Y = compute_gaussian_kernel_variable_bandwidth(Y, sigma_Y)
+    if torch.cuda.is_available():
+        x = x.to(device='cuda')
+        sigma = sigma.to(device='cuda')
+    # end
+
+    # 2. Safety guard: Prevent division by zero if any dimension's variance collapsed
+    # This replaces the old max(val, 1e-6) logic for the vector
+    sigma_safe = torch.clamp(sigma, min=1e-8)
+
+    # 3. Geometric Scaling
+    # Broadcast division: x is (N, D), sigma_safe is (D,) -> x_scaled is (N, D)
+    x_scaled = x / sigma_safe
+
+    # 4. Squared Pairwise distances on the scaled feature space
+    # cdist computes full matrix (N, N)
+    dist_sq = torch.cdist(x_scaled, x_scaled, p=2) ** 2
     
-    # 3. Compute Unbiased HSIC score
-    return compute_unbiased_hsic(K_X, K_Y)
+    # 5. Compute Kernel
+    # Since we already divided by sigma inside the squared distance, 
+    # we now only divide by 2.0.
+    return torch.exp(-dist_sq / 2.0)
+
+def get_cka_value(
+    kernel_x_length_scale: torch.Tensor,
+    kernel_y_length_scale: torch.Tensor,
+    x: torch.Tensor, 
+    y: torch.Tensor
+) -> float:
+    """
+    Computes CKA similarity: HSIC(K, L) / sqrt(HSIC(K, K) * HSIC(L, L))
+    """
+    # 1. Compute Kernel Matrices (N x N)
+    K = compute_rbf_kernel(x, kernel_x_length_scale)
+    L = compute_rbf_kernel(y, kernel_y_length_scale)
+
+    K = K.to(torch.float32)
+    L = L.to(torch.float32)
+    
+    # 2. Compute HSIC values
+    hsic_kl = hsic_centered(K, L)
+    hsic_kk = hsic_centered(K, K)
+    hsic_ll = hsic_centered(L, L)
+    
+    # 3. Normalize
+    cka = hsic_kl / (torch.sqrt(hsic_kk * hsic_ll) + 1e-8)
+
+    val_cka = cka.cpu().item()
+    return val_cka
+
 
 def compute_cka(X: np.ndarray, Y: np.ndarray) -> float:
     """
@@ -132,18 +121,18 @@ def compute_cka(X: np.ndarray, Y: np.ndarray) -> float:
     CKA(X, Y) = HSIC(X, Y) / sqrt(HSIC(X, X) * HSIC(Y, Y))
     
     Returns a score between 0 (independent) and 1 (identical).
-    """
-    hsic_xy = compute_hsic(X, Y)
-    hsic_xx = max(compute_hsic(X, X), 0.0)
-    hsic_yy = max(compute_hsic(Y, Y), 0.0)
-    
-    denominator = np.sqrt(hsic_xx * hsic_yy)
-    if denominator == 0.0:
-        return 0.0
-    # end if
-        
-    cka_val = hsic_xy / denominator
-    
+    """ 
+    # cka_val = hsic_xy / denominator
+    sigma_X = get_median_scale(torch.from_numpy(X))
+    sigma_Y = get_median_scale(torch.from_numpy(Y))
+
+    cka_val = get_cka_value(
+        sigma_X,
+        sigma_Y,
+        torch.from_numpy(X),
+        torch.from_numpy(Y)
+    )
+
     # Clip CKA to [-1, 1] for sanity, though standard CKA is [0, 1]
     return float(np.clip(cka_val, -1.0, 1.0))
 
