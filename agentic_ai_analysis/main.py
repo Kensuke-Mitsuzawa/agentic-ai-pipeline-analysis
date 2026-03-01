@@ -57,13 +57,13 @@ def run_evaluation_pipeline(
         _n_failed_tasks = _n_total_tasks - _n_success_tasks
         logger.info(f"Total tasks: {_n_total_tasks}, Success: {_n_success_tasks}, Failed: {_n_failed_tasks}")
 
-        path_results = [_obj.path_results for _obj in _seq_worker_envelopes if _obj.path_results is not None]
-        pipeline_objects = load_results(path_results)
+        # path_results = [_obj.path_results for _obj in _seq_worker_envelopes if _obj.path_results is not None]
+        # pipeline_objects = load_results(path_results)
 
-        logger.info("Computing metrics based on outcomes...")
-        compute_cka_agent_nodes.compute_and_visualize_cka(pipeline_objects, output_dir)
-        logger.info(f"Pipeline finished successfully. Outputs saved to {output_dir}")
-        return pipeline_objects
+        # logger.info("Computing metrics based on outcomes...")
+        # compute_cka_agent_nodes.compute_and_visualize_cka(pipeline_objects, output_dir)
+        # logger.info(f"Pipeline finished successfully. Outputs saved to {output_dir}")
+        # return pipeline_objects
     finally:
         if server_config is not None:
             logger.info("Stopping local LLM server...")

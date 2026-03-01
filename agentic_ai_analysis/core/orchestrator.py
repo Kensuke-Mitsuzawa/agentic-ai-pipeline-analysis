@@ -146,7 +146,7 @@ class WorkerEnvelope(NamedTuple):
 def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
     result = process_single_query(args.query, args.query_id) 
     # Save results for each query in the chunk
-    path_file = args.log_folder / f"{args.query_id}_result.pkl"
+    path_file = args.log_folder / "outcomes" /  f"{args.query_id}_result.pkl"
     if result is not None:
         _path_file = save_agent_outcomes(result, path_file)
         logger.info(f"saved results for job {path_file}")
