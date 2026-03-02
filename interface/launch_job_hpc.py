@@ -41,7 +41,7 @@ def main():
     assert Path(args.env_file).exists()
     assert Path(args.path_config).exists()
 
-    load_dotenv(args.env_file)
+    load_dotenv(args.env_file, override=True)
 
     slurm_partition = os.environ.get("SLURM_PARTITION")
     if not slurm_partition:

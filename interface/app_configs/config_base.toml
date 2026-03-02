@@ -10,14 +10,18 @@ max_io_workers = 1
 io_queue_size = 2
 
 [slurm_system.profiles.default]
-partition = "dev"
-time = "02:00:00"
-n_nodes_budget = 1
-n_tasks_per_node = 1
-n_cpus_per_task = 4
-n_gpus_per_task = 1
-gres = "gpu:1"
+    partition = "dev"
+    time = "02:00:00"
+    n_nodes_budget = 1
+    n_tasks_per_node = 1
+    n_cpus_per_task = 4
+    n_gpus_per_task = 1
+    gres = "gpu:1"
 
 [local_server]
 model_id = "Qwen/Qwen2.5-3B-Instruct"
 port = 8000
+
+    [local_server.quantization_config_dict]
+    load_in_4bit = true
+    load_in_8bit = false
