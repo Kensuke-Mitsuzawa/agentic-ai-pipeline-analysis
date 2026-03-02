@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
-from agentic_ai_analysis import main
+from agentic_ai_analysis import main as module_main
+from agentic_ai_analysis.cka import compute_cka_researcher_iteration
 
 
 def main(
@@ -9,7 +10,7 @@ def main(
     
     seq_target_files = list(path_dir_outcome_pickles.rglob("*result.pkl"))
     # print(seq_target_files)
-    seq_container = main.load_results(seq_target_files)
+    seq_container = module_main.load_results(seq_target_files)
 
     graph_dependency = {
         "agent_2_researcher": ["agent_4_judge_docs", "agent_5_final"],
@@ -22,16 +23,29 @@ def main(
         "prompt": ["agent_2_researcher", "agent_3_distractor"]
     }
 
-    res_matrix = main.compute_cka_agent_nodes.compute_and_visualize_cka(
+    path_dir_cka_agents = path_dir_output_artifacts / "cka_agents"
+    path_dir_cka_agents.mkdir(parents=True, exist_ok=True)
+    res_matrix = module_main.compute_cka_agent_nodes.compute_and_visualize_cka(
         seq_container, 
-        path_dir_output_artifacts, 
+        path_dir_cka_agents, 
         graph_dependency=graph_dependency,
         dependency_start_node=dependency_start_node
-        )
-    print(path_dir_output_artifacts / "cka_heatmap.png")
-    print(path_dir_output_artifacts / "cka_graph.mmd")
+    )
+    print(path_dir_cka_agents / "cka_heatmap.png")
+    print(path_dir_cka_agents / "cka_graph.mmd")
     print(res_matrix)
     print(f"N-sample: {len(seq_container)}")
+
+    # ---- compute researcher iterations CKA ----
+    path_dir_cka_researcher = path_dir_output_artifacts / "cka_researcher_iteration"
+    path_dir_cka_researcher.mkdir(parents=True, exist_ok=True)
+    res_iterations = compute_cka_researcher_iteration.compute_cka_researcher_iteration(
+        seq_container,
+        path_dir_cka_researcher,
+        file_name_mermaid="cka_researcher_iterations_graph.mmd"
+    )
+    print(path_dir_cka_researcher / "cka_researcher_iterations_graph.mmd")
+    
 
     # ---- output for analysis ----
     _node_key_distractor = "agent_3_distractor"
@@ -62,6 +76,8 @@ if __name__ == '__main__':
 
     _opts = _args.parse_args()
     assert _opts.path_dir_outcome_pickles.exists()
+
+    _opts.path_dir_output_artifacts.mkdir(parents=True, exist_ok=True)
 
     main(
         path_dir_outcome_pickles=_opts.path_dir_outcome_pickles,
