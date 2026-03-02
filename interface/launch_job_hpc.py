@@ -73,6 +73,7 @@ def main():
     script_path = Path(__file__).resolve().parent
     target_script_path = (script_path / "interface_job.py").as_posix()
 
+    python_args = f"--n_samples {args.n_samples} --env_file {args.env_file} --path_config {args.path_config}"
     # Build command to submit the ORCHESTRATOR
     cmd = [
         "sbatch",
@@ -84,7 +85,7 @@ def main():
         f"--error={slurm_log_folder}/orchestrator_%j.err",  # Separate error log
         # We pass the environment variable forward so the Master knows which config to use
         f"--export=ALL,LD_LIBRARY_PATH={lib_path}:$LD_LIBRARY_PATH",
-        "--wrap", f"source /etc/profile.d/modules.sh && {current_interpreter} {target_script_path}"
+        "--wrap", f"source /etc/profile.d/modules.sh && {current_interpreter} {target_script_path} {python_args}"
     ]
 
     print(f"🚀 Submitting Orchestrator to {slurm_partition}...")
