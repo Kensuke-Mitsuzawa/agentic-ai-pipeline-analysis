@@ -17,7 +17,7 @@ class ResearcherNodeOutcome(BaseNodeOutcome):
 
 
 class PipelineOutcome(BaseModel):
-	query_id: int
+	query_id: str
 	prompt: str
 	final_outcome: str
 	success: bool

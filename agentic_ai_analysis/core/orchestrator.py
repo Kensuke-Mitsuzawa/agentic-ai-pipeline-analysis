@@ -5,6 +5,7 @@ import logging
 import time
 import joblib
 import math
+import hashlib
 
 from typing import Dict, Any, List, Optional, NamedTuple, Union, Optional
 
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 
-def process_single_query(query: str, query_id: int) -> Optional[data_models.PipelineOutcome]:
+def process_single_query(query: str, query_id: str) -> Optional[data_models.PipelineOutcome]:
     """
     Executes the multi-agent DAG for a single query.
     Returns the textual outputs for all embedded nodes using the Pydantic model.
@@ -133,7 +134,7 @@ def save_agent_outcomes(results: data_models.PipelineOutcome, path_file: Path) -
 
 class WorkerFunctionArgs(NamedTuple):
     query: str
-    query_id: int
+    query_id: str
     log_folder: Path
     chunk_idx: int
 
@@ -188,7 +189,11 @@ def run_orchestration(
 
     # 1. Distribute queries proportionally across the chosen profiles based on node budget
     total_budget = sum(p.n_nodes_budget for p in profiles)
-    if total_budget == 0: total_budget = len(profiles) # Fallback to even split
+    if total_budget == 0: 
+        total_budget = len(profiles) # Fallback to even split
+    # end if
+
+    # TODO filter the existing outcomes
 
     profile_query_splits = []
     start_idx = 0
@@ -199,7 +204,7 @@ def run_orchestration(
         start_idx += share
 
     all_jobs = []
-    global_query_id = 0
+    # global_query_id = 0
 
     # 2. Setup Executors and Submit Jobs per Profile
     for p_name, profile, assigned_queries in zip(profile_names, profiles, profile_query_splits):
@@ -238,16 +243,18 @@ def run_orchestration(
         for chunk_idx, chunk in enumerate(chunks):
             # submitit.batch() is highly recommended for submitting multiple jobs quickly
             with executor.batch():
+                _item_chunk: str
                 for _item_chunk in chunk:
+                    _query_id = hashlib.sha256(_item_chunk.encode("utf-8")).hexdigest()
                     _worker_func_args = WorkerFunctionArgs(
                         query=_item_chunk,
-                        query_id=global_query_id,
+                        query_id=_query_id,
                         log_folder=log_folder,
                         chunk_idx=chunk_idx
                     )
                     job = executor.submit(main_worker, _worker_func_args)
                     all_jobs.append(job)
-                    global_query_id += 1
+                    # global_query_id += 1
                     
         logger.info(f"Finished submitting jobs to {p_name}.")
 

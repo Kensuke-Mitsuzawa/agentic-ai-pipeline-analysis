@@ -17,7 +17,7 @@ n_gpus_per_task = 1
 gres = "gpu:1"
 
 [local_server]
-model_id = "Qwen/Qwen2.5-7B-Instruct"
+model_id = "Qwen/Qwen2.5-3B-Instruct"
 port = 8000
 
 [local_server.quantization_config_dict]
