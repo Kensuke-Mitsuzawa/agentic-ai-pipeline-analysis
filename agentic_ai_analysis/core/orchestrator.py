@@ -193,7 +193,26 @@ def run_orchestration(
         total_budget = len(profiles) # Fallback to even split
     # end if
 
-    # TODO filter the existing outcomes
+    # Filter the existing outcomes
+    outcomes_dir = log_folder / 'outcomes'
+    done_query_ids = set()
+    if outcomes_dir.exists():
+        for file_path in outcomes_dir.glob("*_result.pkl"):
+            query_id = file_path.name.replace("_result.pkl", "")
+            done_query_ids.add(query_id)
+        # end for
+    # end if
+
+    filtered_queries = []
+    for q in queries:
+        q_id = hashlib.sha256(q.encode("utf-8")).hexdigest()
+        if q_id not in done_query_ids:
+            filtered_queries.append(q)
+        # end if
+    # end for
+    
+    logger.info(f"Skipping {len(queries) - len(filtered_queries)} queries that are already completed. {len(filtered_queries)} left to process.")
+    queries = filtered_queries 
 
     profile_query_splits = []
     start_idx = 0
@@ -240,6 +259,7 @@ def run_orchestration(
         chunks = [assigned_queries[i:i + chunk_size] for i in range(0, len(assigned_queries), chunk_size) if len(assigned_queries[i:i + chunk_size]) > 0]
 
         # Submit jobs for this profile
+        chunk: list[str]
         for chunk_idx, chunk in enumerate(chunks):
             # submitit.batch() is highly recommended for submitting multiple jobs quickly
             with executor.batch():
