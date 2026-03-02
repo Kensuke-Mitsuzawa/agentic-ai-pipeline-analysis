@@ -22,6 +22,7 @@ dependencies = [
     "langgraph>=1.0.10",
     "matplotlib>=3.10.8",
     "mmd-tst-variable-detector",
+    "networkx>=3.6.1",
     "numpy>=1.24.2",
     "protobuf>=7.34.0",
     "pydantic>=2.12.5",

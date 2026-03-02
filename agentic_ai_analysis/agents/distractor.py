@@ -11,11 +11,10 @@ def run_distractor(prompt: str) -> str:
     llm = get_llm()
     
     patterns = [
-        "Output a Python code snippet.",
         "Output a recipe.",
-        "Output random keyboard mashing.",
         "Output a sentence in French.",
         "Output a random Wikipedia article headline (just the headline text)."
+        "Output a short German poem."
     ]
     pattern = random.choice(patterns)
     

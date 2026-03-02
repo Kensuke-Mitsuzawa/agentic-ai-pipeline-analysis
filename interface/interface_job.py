@@ -60,7 +60,7 @@ def main():
         return
         
     logger.info("Loading dataset from HuggingFace...")
-    dataset = load_dataset("MMInstruction/ArxivQA", split="train")
+    dataset = load_dataset("jmhb/PaperSearchQA", split="train")
     
     # We use the 'question' column from the dataset as the query
     queries = dataset["question"][:args.n_samples]
