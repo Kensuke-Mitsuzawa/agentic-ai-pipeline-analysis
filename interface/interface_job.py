@@ -26,7 +26,7 @@ def main():
     args = parser.parse_args()
     
     # Configure root logger
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
     # Load .env file if it exists
     load_dotenv(args.env_file)
