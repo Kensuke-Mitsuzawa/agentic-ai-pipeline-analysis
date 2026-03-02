@@ -45,13 +45,16 @@ def run_evaluation_pipeline(
     """
     logger.info(f"Starting orchestration pipeline for {len(queries)} queries...")
     
-    if server_config is not None:
-        logger.info("Launching local LLM server...")
-        start_local_server(server_config)
-    # end if
+    # if server_config is not None:
+    #     logger.info("Launching local LLM server...")
+    #     start_local_server(server_config)
+    # # end if
 
     try:
-        _seq_worker_envelopes = run_orchestration(queries, hpc_config=hpc_config)
+        _seq_worker_envelopes = run_orchestration(
+            queries, 
+            hpc_config=hpc_config,
+            local_server_config=server_config)
         _n_total_tasks = len(_seq_worker_envelopes)
         _n_success_tasks = sum([1 for _env in _seq_worker_envelopes if _env.job_status == "success"])
         _n_failed_tasks = _n_total_tasks - _n_success_tasks
@@ -64,9 +67,11 @@ def run_evaluation_pipeline(
         # compute_cka_agent_nodes.compute_and_visualize_cka(pipeline_objects, output_dir)
         # logger.info(f"Pipeline finished successfully. Outputs saved to {output_dir}")
         # return pipeline_objects
-    finally:
-        if server_config is not None:
-            logger.info("Stopping local LLM server...")
-            stop_local_server()
-        # end if
+    except Exception as e:
+        logger.error(f"{e}")
+    # finally:
+        # if server_config is not None:
+        #     logger.info("Stopping local LLM server...")
+        #     stop_local_server()
+        # # end if
     # end try

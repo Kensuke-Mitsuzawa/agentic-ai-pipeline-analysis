@@ -16,7 +16,8 @@ from agentic_ai_analysis.agents.distractor import run_distractor
 from agentic_ai_analysis.agents.judge import run_judge
 from agentic_ai_analysis.agents.synthesizer import run_synthesizer
 
-from agentic_ai_analysis.core.configs_hpc import SlurmSystemConfig
+from .local_server import start_local_server, stop_local_server, LocalServerConfig
+from .configs_hpc import SlurmSystemConfig
 import math
 
 
@@ -31,10 +32,6 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
     """
     nodes: List[Any] = []
 
-    import logging
-
-    logger = logging.getLogger(__name__)
-    logger.info(f"Processing query {query_id}: {query}")    
     try:
         logger.info("Running researcher...")
         # Agent 2: Researcher (Modular State-Machine Workflow)
@@ -137,6 +134,7 @@ class WorkerFunctionArgs(NamedTuple):
     query_id: str
     log_folder: Path
     chunk_idx: int
+    server_config: LocalServerConfig
 
 
 class WorkerEnvelope(NamedTuple):
@@ -146,6 +144,15 @@ class WorkerEnvelope(NamedTuple):
 
 
 def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Processing query {args.query_id}: {args.query}")
+
+    logger.info("Starting a server...")
+    start_local_server(config=args.server_config)
+    logger.info("The server is ready.")
+
     result = process_single_query(args.query, args.query_id) 
     # Save results for each query in the chunk
     path_file = args.log_folder / "outcomes" /  f"{args.query_id}_result.pkl"
@@ -165,14 +172,17 @@ def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
             job_status="failed",
         )
     # end if
-    
-    return envelope_obj
 
+    logger.info("Stopping local LLM server...")
+    stop_local_server()
+
+    return envelope_obj
 
 
 def run_orchestration(
     queries: List[str], 
     hpc_config: SlurmSystemConfig, 
+    local_server_config: LocalServerConfig,
     profile_names: Optional[List[str]] = None) -> List[Any]:
     """
     Uses submitit to dispatch tasks across one or multiple heterogeneous SLURM partitions.
@@ -250,7 +260,8 @@ def run_orchestration(
                         query=_item_chunk,
                         query_id=_query_id,
                         log_folder=log_folder,
-                        chunk_idx=chunk_idx
+                        chunk_idx=chunk_idx,
+                        server_config=local_server_config
                     )
                     job = executor.submit(main_worker, _worker_func_args)
                     all_jobs.append(job)
