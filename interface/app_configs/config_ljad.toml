@@ -1,7 +1,7 @@
 [slurm_system]
 log_folder = "/scratch/kmitsuzawa/project/agentic-ai-pipeline-analysis/exec_a781a9526be07ed1cd1b8044c7ffb94bcc1895b6"
 
-default_profiles = ["amd6000", "v100"]
+default_profiles = ["amd6000", "intelv100"]
 
 is_delete_worker_output = true
 is_download_resources_prepost = true
