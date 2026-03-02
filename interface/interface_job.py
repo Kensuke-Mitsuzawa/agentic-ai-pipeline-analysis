@@ -35,7 +35,7 @@ def main():
     args = parser.parse_args()
     
     # Configure root logger
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
     config_path = Path(args.path_config)
     if not config_path.exists():
