@@ -1,6 +1,6 @@
 [slurm_system]
 log_folder = "pipeline_outcomes_hf_local"
-default_profile = "local"
+default_profiles = ["local"]
 is_delete_worker_output = true
 is_download_resources_prepost = true
 is_download_resources_at_worker = false
@@ -9,7 +9,7 @@ io_queue_size = 2
 
 [slurm_system.profiles.local]
 partition = "dev"
-time = "00:10:00"
+time = "03:00:00"
 n_nodes_budget = 1
 n_tasks_per_node = 1
 n_cpus_per_task = 1
@@ -17,10 +17,11 @@ n_gpus_per_task = 1
 gres = "gpu:1"
 
 [local_server]
-model_id = "Qwen/Qwen2.5-3B-Instruct"
+model_id = "Qwen/Qwen2.5-7B-Instruct"
 port = 8000
 
 [local_server.quantization_config_dict]
 load_in_4bit = true
 bnb_4bit_quant_type = "nf4"
 bnb_4bit_compute_dtype = "float16"
+

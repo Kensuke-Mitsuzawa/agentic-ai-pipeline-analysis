@@ -110,8 +110,16 @@ async def chat_completions(request: Request):
     }
     return response
 
-def _run_server(config_json: str, error_queue: multiprocessing.Queue = None) -> None:
+def _run_server(
+    config_json: str, 
+    error_queue: Optional[multiprocessing.Queue] = None, 
+    env_dict: Optional[Dict[str, str]] = None
+) -> None:
     """Entry point for the multiprocessing.Process"""
+    if env_dict:
+        os.environ.update(env_dict)
+
+    print(f"DEBUG child process HF_HOME: {os.environ.get('HF_HOME')}")
     try:
         # Initialize the model before starting the server so health-check is truthful
         config = LocalServerConfig.model_validate_json(config_json)
@@ -136,9 +144,13 @@ class LocalServerManager:
         self.error_queue = multiprocessing.Queue()
         
         # Start the FastAPI runner process
+        
+        # We need to explicitly pass the loaded environment variables to the 
+        # multiprocessing worker so they aren't lost to default sub-shell env setup.
+        env_dict = dict(os.environ)
         self.process = multiprocessing.Process(
             target=_run_server,
-            args=(self.config.model_dump_json(), self.error_queue),
+            args=(self.config.model_dump_json(), self.error_queue, env_dict),
             daemon=False
         )
         self.process.start()
