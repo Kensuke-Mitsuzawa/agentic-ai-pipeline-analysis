@@ -30,6 +30,7 @@ dependencies = [
     "seaborn",
     "sentence-transformers>=5.2.3",
     "submitit>=1.5.4",
+    "tomli-w>=1.2.0",
     "torch>=2.4.0,<2.8.0",
     "transformers>=5.0.0",
     "vllm",
