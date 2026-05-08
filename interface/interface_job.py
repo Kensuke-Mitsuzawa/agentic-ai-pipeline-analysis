@@ -12,11 +12,10 @@ _early_parser.add_argument('-e', '--env_file', type=str, default='.env')
 _early_args, _ = _early_parser.parse_known_args()
 load_dotenv(_early_args.env_file, override=True)
 
-import os
 print(f"HF_HOME: {os.environ.get('HF_HOME')}")
 from agentic_ai_analysis.main import run_evaluation_pipeline
 from agentic_ai_analysis.core.local_server import LocalServerConfig
-from agentic_ai_analysis.core.configs_hpc import SlurmSystemConfig
+from agentic_ai_analysis.core.configs_hpc import SubmititSystemConfig
 
 logger = logging.getLogger()
 
@@ -46,11 +45,29 @@ def main():
         config_dict = tomllib.load(f)
         
     # Build configurations
-    slurm_dict = config_dict.get("slurm_system", {})
+    submitit_dict = config_dict.get("submitit_system", config_dict.get("slurm_system", {}))
     server_dict = config_dict.get("local_server", {})
+    llm_client_dict = config_dict.get("llm_client", {})
     
-    hpc_config = SlurmSystemConfig(**slurm_dict)
-    server_config = LocalServerConfig(**server_dict) if server_dict else None
+    hpc_config = SubmititSystemConfig(**submitit_dict)
+
+    # If you're using a port-forwarded *remote* server (already running at localhost:8000),
+    # we should NOT attempt to start a local HF server. Make it opt-in via config:
+    #   [local_server]
+    #   start = true
+    should_start_local_server = bool(server_dict.get("start", False))
+    server_config = LocalServerConfig(**server_dict) if (server_dict and should_start_local_server) else None
+
+    # Optional: allow the config to specify the OpenAI-compatible endpoint/model for the agents.
+    # This is useful for port-forward setups to a remote GPU machine.
+    # Example:
+    #   [llm_client]
+    #   openai_api_base = "http://localhost:8000/v1/"
+    #   model = "Qwen/Qwen3.5-27B-FP8"
+    if "openai_api_base" in llm_client_dict:
+        os.environ["OPENAI_API_BASE"] = str(llm_client_dict["openai_api_base"])
+    if "model" in llm_client_dict:
+        os.environ["OPENAI_MODEL"] = str(llm_client_dict["model"])
     
     logger.info("=== Running HuggingFace ArxivQA ===")
     try:

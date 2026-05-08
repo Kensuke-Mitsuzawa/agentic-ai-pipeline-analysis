@@ -30,6 +30,11 @@ def get_llm(
     # Alternatively, if serving via OpenAI compatible endpoints (vLLM):
     from langchain_openai import ChatOpenAI
     
+    # Allow environment override so interface scripts can switch endpoints/models
+    # without editing code (e.g., when using port-forward to a remote machine).
+    base_url = os.environ.get("OPENAI_API_BASE", base_url)
+    model = os.environ.get("OPENAI_MODEL", model)
+
     # We use ChatOpenAI pointing to the local vLLM server since it exposes standard API
     llm = ChatOpenAI(
         model=model,

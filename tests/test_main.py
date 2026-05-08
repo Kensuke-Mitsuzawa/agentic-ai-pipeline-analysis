@@ -6,7 +6,7 @@ import os
 
 from agentic_ai_analysis.main import run_evaluation_pipeline
 from agentic_ai_analysis.core.local_server import LocalServerConfig
-from agentic_ai_analysis.core.configs_hpc import SlurmSystemConfig, SlurmProfile
+from agentic_ai_analysis.core.configs_hpc import SubmititSystemConfig, SubmititProfile
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +40,11 @@ def test_mini_dataset():
         quantization_config_dict=None,
     )
 
-    hpc_config = SlurmSystemConfig(
+    hpc_config = SubmititSystemConfig(
         log_folder=Path("./pipeline_outcomes_mini"),
         default_profile="local",
         profiles={
-            "local": SlurmProfile(
+            "local": SubmititProfile(
                 partition="dev",
                 time="00:10:00",
                 n_nodes_budget=1,
@@ -92,11 +92,11 @@ def test_hf_dataset(n_samples: int = 15):
         port=8000
     )
 
-    hpc_config = SlurmSystemConfig(
+    hpc_config = SubmititSystemConfig(
         log_folder=Path("./pipeline_outcomes_hf"),
         default_profile="local",
         profiles={
-            "local": SlurmProfile(
+            "local": SubmititProfile(
                 partition="dev",
                 time="00:10:00",
                 n_nodes_budget=1,

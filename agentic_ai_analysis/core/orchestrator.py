@@ -17,7 +17,7 @@ from agentic_ai_analysis.agents.judge import run_judge
 from agentic_ai_analysis.agents.synthesizer import run_synthesizer
 
 from .local_server import start_local_server, stop_local_server, LocalServerConfig
-from .configs_hpc import SlurmSystemConfig
+from .configs_hpc import SubmititSystemConfig
 import math
 from agentic_ai_analysis.llm_ops.langfuse_tracing import get_tracer
 
@@ -193,7 +193,7 @@ def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
 
 def run_orchestration(
     queries: List[str], 
-    hpc_config: SlurmSystemConfig, 
+    hpc_config: SubmititSystemConfig, 
     local_server_config: LocalServerConfig,
     profile_names: Optional[List[str]] = None) -> List[Any]:
     """

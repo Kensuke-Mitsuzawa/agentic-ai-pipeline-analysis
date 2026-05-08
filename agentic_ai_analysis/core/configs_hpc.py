@@ -3,9 +3,9 @@ from pathlib import Path
 from pydantic import BaseModel, Field, model_validator, field_validator, AliasChoices
 
 
-class SlurmProfile(BaseModel):
+class SubmititProfile(BaseModel):
     """Defines the hardware resources for a specific type of job."""
-    partition: str = Field(description="The Slurm partition name (e.g., 'gpu_p13', 'cpu_short')")
+    partition: str = Field(description="The partition name (e.g., 'gpu_p13', 'cpu_short')")
     n_nodes_budget: int = Field(default=1, description="The total number of nodes given. This pipeline automatically splits under this given condition.")
     n_tasks_per_node: int = Field(default=1)
     n_cpus_per_task: int = Field(default=4)
@@ -16,20 +16,20 @@ class SlurmProfile(BaseModel):
     gres: ty.Optional[str] = Field(default=None, description="Generic resources, e.g., 'gpu:1'")
 
 
-class EstimatorSlurmMap(BaseModel):
-    """Maps a specific LLM/Estimator to one or multiple Slurm Profiles."""
+class EstimatorSubmititMap(BaseModel):
+    """Maps a specific LLM/Estimator to one or multiple Submitit profiles."""
     # CHANGED: Now accepts a list of profiles for heterogeneous dispatch
-    profile_names: ty.Union[str, ty.List[str]] = Field(description="Must match keys in SlurmSystemConfig.profiles")
+    profile_names: ty.Union[str, ty.List[str]] = Field(description="Must match keys in SubmititSystemConfig.profiles")
     overrides: ty.Optional[ty.Dict[str, ty.Any]] = Field(default=None, description="Specific overrides for this model")
 
 
-class SlurmSystemConfig(BaseModel):
-    """Root configuration for HPC Environment."""
-    log_folder: Path = Field(default=Path("slurm_logs"), description="Directory to store submitit logs and worker logs")
+class SubmititSystemConfig(BaseModel):
+    """Root configuration for submitit-based dispatch."""
+    log_folder: Path = Field(default=Path("submitit_logs"), description="Directory to store submitit logs and worker logs")
     
-    profiles: ty.Dict[str, SlurmProfile] = Field(description="Dictionary of available hardware profiles")
+    profiles: ty.Dict[str, SubmititProfile] = Field(description="Dictionary of available hardware profiles")
     
-    estimator_dispatch_map: ty.Dict[str, EstimatorSlurmMap] = Field(
+    estimator_dispatch_map: ty.Dict[str, EstimatorSubmititMap] = Field(
         default_factory=dict, 
         description="Configuration for dispatching specific estimators"
     )
@@ -59,7 +59,7 @@ class SlurmSystemConfig(BaseModel):
         return list(v)
 
     @model_validator(mode='after')
-    def validate_profiles_exist(self) -> 'SlurmSystemConfig':
+    def validate_profiles_exist(self) -> 'SubmititSystemConfig':
         """Ensure all mapped profiles actually exist."""
         # Normalize to list for validation
         defs = self.default_profiles
@@ -75,3 +75,9 @@ class SlurmSystemConfig(BaseModel):
                 if p not in self.profiles:
                     raise ValueError(f"Model {model} maps to non-existent profile '{p}'")
         return self
+
+
+# Backward compatible aliases (external callers/tests may still import these).
+SlurmProfile = SubmititProfile
+EstimatorSlurmMap = EstimatorSubmititMap
+SlurmSystemConfig = SubmititSystemConfig

@@ -1,4 +1,4 @@
-[slurm_system]
+[submitit_system]
 log_folder = "pipeline_outcomes_hf_local"
 default_profiles = ["local"]
 is_delete_worker_output = true
@@ -7,7 +7,7 @@ is_download_resources_at_worker = false
 max_io_workers = 1
 io_queue_size = 2
 
-[slurm_system.profiles.local]
+[submitit_system.profiles.local]
 partition = "dev"
 time = "03:00:00"
 n_nodes_budget = 1

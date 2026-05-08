@@ -5,7 +5,7 @@ import numpy as np
 import logging
 from typing import List, Dict, Any, Optional
 from .core.local_server import start_local_server, stop_local_server, LocalServerConfig
-from .core.configs_hpc import SlurmSystemConfig
+from .core.configs_hpc import SubmititSystemConfig
 from .agents.data_models import PipelineOutcome
 from .core.orchestrator import run_orchestration
 from .core.llm_client import get_embeddings
@@ -35,7 +35,7 @@ def load_results(path_results: list[Path]) -> list[PipelineOutcome]:
 
 def run_evaluation_pipeline(
     queries: List[str],
-    hpc_config: SlurmSystemConfig,
+    hpc_config: SubmititSystemConfig,
     output_dir: Path,
     server_config: Optional[LocalServerConfig] = None,
     evaluation_sampling_rate: float = 0.0,
