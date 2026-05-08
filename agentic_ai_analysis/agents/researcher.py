@@ -92,12 +92,6 @@ def run_researcher(
     # Parse structured input
     context_id, options, question = parse_structured_query(user_query)
     initial_context = ""
-    if context_id:
-        initial_context = fetch_wiki_summary(context_id)
-        if initial_context:
-            logger.info(f"Successfully fetched Wikipedia context for {context_id}")
-        else:
-            logger.warning(f"Could not fetch Wikipedia context for {context_id}")
 
     # Initial Extraction
     if initial_context:
@@ -107,7 +101,7 @@ def run_researcher(
             "Context: {context}\n\n"
             "Question: {question}\n"
             "Options: {options}\n\n"
-            f"Extract the most important {n_keyword_extraction} keywords to search for additional information that would help answer the question accurately.\n"
+            f"Generate the most important {n_keyword_extraction} keywords to search for additional information that would help answer the question accurately.\n"
             "Return ONLY a comma-separated list of keywords.\n"
             "Do not provide any conversational text or explanation.\n\n"
             "Keywords:"
@@ -120,7 +114,7 @@ def run_researcher(
     else:
         init_extract_prompt = PromptTemplate.from_template(
             "You are a helpful keyword extractor. "
-            f"Given the user prompt, extract the most {n_keyword_extraction} important keywords and return ONLY a comma-separated list.\n"
+            f"Given the user prompt, extract the most important {n_keyword_extraction} keywords and return ONLY a comma-separated list.\n"
             "Do not provide any conversational text or explanation.\n\n"
             "Prompt: {prompt}\nKeywords:"
         )
