@@ -73,8 +73,17 @@ def run_evaluation_pipeline(
         if evaluation_sampling_rate > 0.0:
             tracer = get_tracer()
             eval_map = evaluate_outcomes(pipeline_objects, sampling_rate=evaluation_sampling_rate)
+            outcome_map = {o.query_id: o for o in pipeline_objects}
             for qid, metrics in eval_map.items():
-                trace = tracer.start_trace(trace_id=qid, name="rag_pipeline", input="", metadata={})
+                outcome = outcome_map.get(qid)
+                # Re-fetch/update trace info so Langfuse UI shows the full context in the evaluation view
+                trace = tracer.start_trace(
+                    trace_id=qid, 
+                    name="rag_pipeline", 
+                    input=outcome.prompt if outcome else "",
+                    output=outcome.final_outcome if outcome else None,
+                    metadata={}
+                )
                 for m in metrics:
                     tracer.score(trace, name=m.name, value=m.value)
 
@@ -86,7 +95,13 @@ def run_evaluation_pipeline(
             vals = tri[tri != 0]
             cka_mean = float(vals.mean()) if vals.size else 0.0
             for o in pipeline_objects:
-                trace = tracer.start_trace(trace_id=o.query_id, name="rag_pipeline", input="", metadata={})
+                trace = tracer.start_trace(
+                    trace_id=o.query_id, 
+                    name="rag_pipeline", 
+                    input=o.prompt, 
+                    output=o.final_outcome,
+                    metadata={}
+                )
                 tracer.score(trace, name="cka_mean", value=cka_mean)
         
         # Ensure all traces are sent to the server

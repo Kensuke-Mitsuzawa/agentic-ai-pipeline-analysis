@@ -39,6 +39,8 @@ def process_single_query(
 
     tracer = get_tracer()
     trace = tracer.start_trace(trace_id=query_id, name="rag_pipeline", input=query, metadata={})
+    
+    model_name = os.environ.get("OPENAI_MODEL", "local-model")
 
     # Extract the effective question for subsequent agents if the query is a PromptContext JSON
     try:
@@ -53,8 +55,10 @@ def process_single_query(
         logger.info("Running researcher...")
         # Agent 2: Researcher (Modular State-Machine Workflow)
         # Researcher handles the structured JSON itself to get context IDs
-        with tracer.span(trace, name="agent_2_researcher", input=query):
+        with tracer.generation(trace, name="agent_2_researcher", model=model_name, input=query) as s:
             researcher_data = run_researcher(query, node_order=0, generation_parameters=generation_parameters)
+            if s:
+                s.update(output=researcher_data.outcome)
         extracted_docs = researcher_data.outcome
 
         nodes.append(researcher_data)
@@ -62,8 +66,10 @@ def process_single_query(
         # Agent 3: Distractor
         logger.info("Running distractor...")        
         start = time.perf_counter()
-        with tracer.span(trace, name="agent_3_distractor", input=effective_query):
+        with tracer.generation(trace, name="agent_3_distractor", model=model_name, input=effective_query) as s:
             distractor_fact = run_distractor(effective_query, generation_parameters=generation_parameters)
+            if s:
+                s.update(output=distractor_fact)
         t_distractor = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=1,
@@ -77,8 +83,10 @@ def process_single_query(
         # Agent 4: Judge (Evaluate 1) On retrieved context
         logger.info("Running judge...")
         start = time.perf_counter()
-        with tracer.span(trace, name="agent_4_judge_docs", input={"query": effective_query, "context": extracted_docs}):
+        with tracer.generation(trace, name="agent_4_judge_docs", model=model_name, input={"query": effective_query, "context": extracted_docs}) as s:
             judge_xml_docs, parsed_docs = run_judge(effective_query, extracted_docs, generation_parameters=generation_parameters)
+            if s:
+                s.update(output=judge_xml_docs)
         t_judge1 = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=2,
@@ -92,8 +100,10 @@ def process_single_query(
         # Agent 4: Judge (Evaluate 2) On distractor context
         logger.info("Running judge...")
         start = time.perf_counter()
-        with tracer.span(trace, name="agent_4_judge_distractor", input={"query": effective_query, "context": distractor_fact}):
+        with tracer.generation(trace, name="agent_4_judge_distractor", model=model_name, input={"query": effective_query, "context": distractor_fact}) as s:
             judge_xml_distractor, parsed_distractor = run_judge(effective_query, distractor_fact, generation_parameters=generation_parameters)
+            if s:
+                s.update(output=judge_xml_distractor)
         t_judge2 = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=3,
@@ -114,8 +124,10 @@ def process_single_query(
             valid_explanations.append(parsed_distractor["explanation"])
             
         start = time.perf_counter()
-        with tracer.span(trace, name="agent_5_final", input={"query": effective_query, "contexts": valid_explanations}):
+        with tracer.generation(trace, name="agent_5_final", model=model_name, input={"query": effective_query, "contexts": valid_explanations}) as s:
             final_answer = run_synthesizer(effective_query, valid_explanations, generation_parameters=generation_parameters)
+            if s:
+                s.update(output=final_answer)
         t_synth = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=4,
@@ -134,6 +146,7 @@ def process_single_query(
             error=None,
             nodes={n.node_name: n for n in nodes}
         )
+        tracer.update_trace(trace, output=final_answer)
         tracer.score(trace, name="pipeline_success", value=1.0)
         return outcome
         

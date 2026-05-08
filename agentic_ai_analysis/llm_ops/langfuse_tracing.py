@@ -58,12 +58,19 @@ class TraceHandle:
 
 
 class _NoopTracer:
-    def start_trace(self, *, trace_id: str, name: str, input: Any, metadata: Optional[dict] = None) -> TraceHandle:
+    def start_trace(self, *, trace_id: str, name: str, input: Any, output: Any = None, metadata: Optional[dict] = None) -> TraceHandle:
         return TraceHandle(trace_id=trace_id, _client=None, _trace=None)
 
+    def update_trace(self, trace: TraceHandle, output: Any, metadata: Optional[dict] = None) -> None:
+        return
+
     @contextmanager
-    def span(self, trace: TraceHandle, *, name: str, input: Any, metadata: Optional[dict] = None) -> Iterator[None]:
-        yield
+    def span(self, trace: TraceHandle, *, name: str, input: Any, metadata: Optional[dict] = None) -> Iterator[Any]:
+        yield None
+
+    @contextmanager
+    def generation(self, trace: TraceHandle, *, name: str, model: str, input: Any, metadata: Optional[dict] = None) -> Iterator[Any]:
+        yield None
 
     def score(self, trace: TraceHandle, *, name: str, value: float, comment: Optional[str] = None) -> None:
         return
@@ -82,23 +89,42 @@ class _LangfuseTracer:
             host=settings.host,
         )
 
-    def start_trace(self, *, trace_id: str, name: str, input: Any, metadata: Optional[dict] = None) -> TraceHandle:
-        trace = self._client.trace(id=trace_id, name=name, input=input, metadata=metadata or {})
+    def start_trace(self, *, trace_id: str, name: str, input: Any, output: Any = None, metadata: Optional[dict] = None) -> TraceHandle:
+        trace = self._client.trace(id=trace_id, name=name, input=input, output=output, metadata=metadata or {})
         return TraceHandle(trace_id=trace_id, _client=self._client, _trace=trace)
 
-    @contextmanager
-    def span(self, trace: TraceHandle, *, name: str, input: Any, metadata: Optional[dict] = None) -> Iterator[None]:
+    def update_trace(self, trace: TraceHandle, output: Any, metadata: Optional[dict] = None) -> None:
         if trace._trace is None:
-            yield
+            return
+        trace._trace.update(output=output, metadata=metadata or {})
+
+    @contextmanager
+    def span(self, trace: TraceHandle, *, name: str, input: Any, metadata: Optional[dict] = None) -> Iterator[Any]:
+        if trace._trace is None:
+            yield None
             return
         span = trace._trace.span(name=name, input=input, metadata=metadata or {})
         try:
-            yield
+            yield span
         except Exception as e:
             span.update(status="ERROR", metadata={"error": str(e)})
             raise
         finally:
             span.end()
+
+    @contextmanager
+    def generation(self, trace: TraceHandle, *, name: str, model: str, input: Any, metadata: Optional[dict] = None) -> Iterator[Any]:
+        if trace._trace is None:
+            yield None
+            return
+        gen = trace._trace.generation(name=name, model=model, input=input, metadata=metadata or {})
+        try:
+            yield gen
+        except Exception as e:
+            gen.update(status="ERROR", metadata={"error": str(e)})
+            raise
+        finally:
+            gen.end()
 
     def score(self, trace: TraceHandle, *, name: str, value: float, comment: Optional[str] = None) -> None:
         if trace._trace is None:

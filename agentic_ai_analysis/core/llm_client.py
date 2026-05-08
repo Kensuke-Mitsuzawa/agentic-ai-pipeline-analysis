@@ -45,7 +45,8 @@ def get_llm(
         frequency_penalty=generation_parameters.frequency_penalty,
         stop=generation_parameters.stop,
         openai_api_key="EMPTY",  # Local endpoint doesn't need key
-        openai_api_base=base_url
+        openai_api_base=base_url,
+        timeout=60, # Add timeout to prevent freezing
     )
     return llm
 

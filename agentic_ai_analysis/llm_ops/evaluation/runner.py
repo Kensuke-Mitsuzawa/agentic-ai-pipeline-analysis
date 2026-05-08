@@ -39,19 +39,39 @@ def evaluate_outcomes(
 ) -> dict[str, List[MetricResult]]:
     """
     Sample-and-evaluate pipeline outcomes.
-
-    This is intentionally safe-by-default:
-    - If sampling_rate == 0.0 -> no evaluation work is performed.
-    - Metric frameworks are optional; this function can return empty results.
     """
+    from agentic_ai_analysis.agents.data_models import PromptContext
+
     results: dict[str, List[MetricResult]] = {}
     for o in outcomes:
         if not should_evaluate(query_id=o.query_id, sampling_rate=sampling_rate):
             continue
 
-        # Placeholder: frameworks will be integrated in later TODOs.
-        # For now, return an empty metric set but keep the wiring stable.
-        results[o.query_id] = []
+        metrics: List[MetricResult] = []
+
+        # 1. Answer Presence & Length
+        answer = o.final_outcome or ""
+        metrics.append(MetricResult(name="answer_length", value=float(len(answer))))
+        metrics.append(MetricResult(name="has_answer", value=1.0 if len(answer.strip()) > 0 else 0.0))
+
+        # 2. Correctness (if options are available in prompt JSON)
+        try:
+            ctx = PromptContext.model_validate_json(o.prompt)
+            if ctx.options:
+                # SciQ logic: first option is the correct one
+                ground_truth = ctx.options[0].lower().strip()
+                is_correct = 1.0 if ground_truth in answer.lower() else 0.0
+                metrics.append(MetricResult(name="is_correct", value=is_correct))
+        except Exception:
+            pass
+
+        # 3. Retrieval Relevance (from Judge agent)
+        judge_node = o.nodes.get("agent_4_judge_docs")
+        if judge_node:
+            is_related = judge_node.args.get("is_related", False)
+            metrics.append(MetricResult(name="context_relevance", value=1.0 if is_related else 0.0))
+
+        results[o.query_id] = metrics
 
     return results
 
