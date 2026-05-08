@@ -67,11 +67,11 @@ def maybe_start_local_server(server_config: ty.Optional[LocalServerConfig]) -> b
 
 
 def load_dataset(dataset_name: str, split: str, n_samples: int) -> ty.List[str]:
-    """Loading the daastet.
+    """Loading the dataset.
 
     Returns: a list of queries.
     """
-    logger.info("=== Running HuggingFace ArxivQA ===")
+    logger.info(f"=== Running HuggingFace {dataset_name} ===")
     try:
         from datasets import load_dataset as hf_load_dataset
     except ImportError:
@@ -79,19 +79,42 @@ def load_dataset(dataset_name: str, split: str, n_samples: int) -> ty.List[str]:
         return []
     # end try
 
-    logger.info("Loading dataset from HuggingFace...")
-    dataset = hf_load_dataset(dataset_name, split=split)
+    logger.info(f"Loading dataset {dataset_name} from HuggingFace...")
+    # Handle different dataset configurations
+    if "ai2_arc" in dataset_name:
+        dataset = hf_load_dataset(dataset_name, "ARC-Easy", split=split)
+    else:
+        dataset = hf_load_dataset(dataset_name, split=split)
     
     # We construct a PromptContext for richer context in the pipeline
     queries = []
     subset = dataset.select(range(min(n_samples, len(dataset))))
     for item in subset:
-        # We store as a JSON string of PromptContext so it's easily serializable 
-        # and compatible with the existing pipeline orchestration.
+        if "sciq" in dataset_name:
+            question = item.get("question", "")
+            # SciQ has distractor1, distractor2, distractor3 and correct_answer
+            options = [
+                item.get("correct_answer", ""),
+                item.get("distractor1", ""),
+                item.get("distractor2", ""),
+                item.get("distractor3", "")
+            ]
+            options = [o for o in options if o]
+            context_id = hashlib.md5(question.encode()).hexdigest()[:10] if "hashlib" in globals() or "hashlib" in locals() else question[:30]
+            # Ensure hashlib is available or import it
+            import hashlib
+            context_id = hashlib.md5(question.encode()).hexdigest()[:10]
+        else:
+            # Default mapping (e.g. for ai2_arc)
+            question = item.get("question", "")
+            choices = item.get("choices", {})
+            options = choices.get("text", [])
+            context_id = item.get("id")
+
         context = PromptContext(
-            arxiv_id=item.get("id"),
-            options=item.get("options"),
-            question=item.get("question", "")
+            context_id=context_id,
+            options=options,
+            question=question
         )
         queries.append(context.model_dump_json())
 
@@ -132,7 +155,7 @@ def main():
     
     output_dir = Path(hpc_config.log_folder)
 
-    queries = load_dataset(dataset_name="MMInstruction/ArxivQA", split="train", n_samples=args.n_samples)
+    queries = load_dataset(dataset_name="sciq", split="test", n_samples=args.n_samples)
     
     logger.info("Invoking run_evaluation_pipeline...")
     run_evaluation_pipeline(

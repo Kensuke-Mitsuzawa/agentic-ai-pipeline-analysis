@@ -3,7 +3,7 @@ from typing import Dict, Any, List, Union, Optional
 
 
 class PromptContext(BaseModel):
-	arxiv_id: Optional[str] = None
+	context_id: Optional[str] = None
 	options: Optional[List[str]] = None
 	question: str
 

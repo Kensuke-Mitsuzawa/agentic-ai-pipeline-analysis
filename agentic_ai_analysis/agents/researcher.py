@@ -6,8 +6,8 @@ from typing import Dict, Any, List, TypedDict, Optional
 
 from langchain_core.prompts import PromptTemplate
 from agentic_ai_analysis.core.llm_client import get_llm
-from langchain_community.tools.arxiv.tool import ArxivQueryRun
-from langchain_community.utilities import ArxivAPIWrapper
+from langchain_community.tools import WikipediaQueryRun
+from langchain_community.utilities import WikipediaAPIWrapper
 from .data_models import ResearcherNodeOutcome, BaseNodeOutcome, PromptContext
 
 
@@ -24,12 +24,12 @@ PossibleNodeNmaes = [
 def parse_structured_query(query: str):
     """
     Tries to parse the query as a PromptContext JSON or a tuple/list.
-    Returns (arxiv_id, options, question) or (None, [], query).
+    Returns (context_id, options, question) or (None, [], query).
     """
     try:
         # 1. Try to parse as PromptContext JSON (New preferred way)
         context = PromptContext.model_validate_json(query)
-        return context.arxiv_id, context.options or [], context.question
+        return context.context_id, context.options or [], context.question
     except Exception:
         pass
 
@@ -52,16 +52,15 @@ def parse_structured_query(query: str):
     return None, [], query
 
 
-def fetch_arxiv_abstract(arxiv_id: str) -> str:
+def fetch_wiki_summary(query: str) -> str:
     """
-    Fetches the abstract of a paper from Arxiv using its ID.
+    Fetches the summary of a topic from Wikipedia.
     """
-    arxiv = ArxivAPIWrapper()
+    wiki = WikipediaAPIWrapper()
     try:
-        # ArxivAPIWrapper.run with an ID returns the paper summary
-        return arxiv.run(arxiv_id)
+        return wiki.run(query)
     except Exception as e:
-        logger.error(f"Failed to fetch Arxiv abstract for {arxiv_id}: {e}")
+        logger.error(f"Failed to fetch Wikipedia summary for {query}: {e}")
         return ""
 
 
@@ -82,46 +81,45 @@ def run_researcher(
     """
     Agent 2: Modular State-Machine Researcher.
     Uses Nodes A (Retriever), B (Filter), C (Judge) to iteratively
-    retrieve Arxiv docs, filter signals, and decide when to stop.
+    retrieve Wikipedia docs, filter signals, and decide when to stop.
     """
     node_order_inner = 0
 
     start_time = time.perf_counter()
     llm = get_llm(generation_parameters=generation_parameters)
-    arxiv_tool = ArxivQueryRun(api_wrapper=ArxivAPIWrapper(top_k_results=10))
-    logger.info(f"DEBUG: Arxiv tool top_k_results: {arxiv_tool.api_wrapper.top_k_results}")
+    wiki_tool = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper(top_k_results=3))
 
     # Parse structured input
-    arxiv_id, options, question = parse_structured_query(user_query)
-    abstract = ""
-    if arxiv_id:
-        abstract = fetch_arxiv_abstract(arxiv_id)
-        if abstract:
-            logger.info(f"Successfully fetched abstract for paper {arxiv_id}")
+    context_id, options, question = parse_structured_query(user_query)
+    initial_context = ""
+    if context_id:
+        initial_context = fetch_wiki_summary(context_id)
+        if initial_context:
+            logger.info(f"Successfully fetched Wikipedia context for {context_id}")
         else:
-            logger.warning(f"Could not fetch abstract for paper {arxiv_id}")
+            logger.warning(f"Could not fetch Wikipedia context for {context_id}")
 
     # Initial Extraction
-    if abstract:
+    if initial_context:
         init_extract_prompt = PromptTemplate.from_template(
-            "You are a helpful academic keyword extractor.\n"
-            "Below is the abstract of an Arxiv paper and a question about it.\n\n"
-            "Abstract: {abstract}\n\n"
+            "You are a helpful knowledge extractor.\n"
+            "Below is some initial context from Wikipedia and a question about it.\n\n"
+            "Context: {context}\n\n"
             "Question: {question}\n"
             "Options: {options}\n\n"
-            f"Extract the most important {n_keyword_extraction} keywords to search for additional research papers that would help answer the question accurately.\n"
+            f"Extract the most important {n_keyword_extraction} keywords to search for additional information that would help answer the question accurately.\n"
             "Return ONLY a comma-separated list of keywords.\n"
             "Do not provide any conversational text or explanation.\n\n"
             "Keywords:"
         )
         prompt_vars = {
-            "abstract": abstract,
+            "context": initial_context,
             "question": question,
             "options": str(options)
         }
     else:
         init_extract_prompt = PromptTemplate.from_template(
-            "You are a helpful academic keyword extractor. "
+            "You are a helpful keyword extractor. "
             f"Given the user prompt, extract the most {n_keyword_extraction} important keywords and return ONLY a comma-separated list.\n"
             "Do not provide any conversational text or explanation.\n\n"
             "Prompt: {prompt}\nKeywords:"
@@ -133,7 +131,7 @@ def run_researcher(
     logger.info(f"Initial keywords: {init_kws_str}")
     
     # We enrich the internal user_query with options for better filtering/judging
-    effective_query = f"{question} Options: {options}" if options else (question if arxiv_id else user_query)
+    effective_query = f"{question} Options: {options}" if options else (question if context_id else user_query)
 
     state: ResearcherState = {
         "user_query": effective_query,
@@ -145,11 +143,11 @@ def run_researcher(
     
     # Prompts for Nodes
     query_prompt = PromptTemplate.from_template(
-        "Based on these keywords: {keywords}, formulate a single concise search query for Arxiv to find the 10 most relevant papers. Only output the query string."
+        "Based on these keywords: {keywords}, formulate a single concise search query for Wikipedia to find the most relevant information. Only output the query string."
     )
     
     filter_prompt = PromptTemplate.from_template(
-        "Read the following raw documents retrieved from Arxiv:\n{docs}\n\n"
+        "Read the following raw documents retrieved from Wikipedia:\n{docs}\n\n"
         "User Query: {user_query}\n\n"
         "Extract only information highly relevant to the user query. "
         "Return the output in strictly formatted XML. Provide a list of <item> elements inside a root <results> element. "
@@ -187,10 +185,10 @@ def run_researcher(
         # Node A: Retriever
         current_kws_str = ", ".join(state["search_keywords"])
         query_chain = query_prompt | llm
-        arxiv_query = str(query_chain.invoke({"keywords": current_kws_str}).content).strip()
+        wiki_query = str(query_chain.invoke({"keywords": current_kws_str}).content).strip()
         
         try:
-            retrieved_docs = arxiv_tool.invoke({"query": arxiv_query})
+            retrieved_docs = wiki_tool.invoke({"query": wiki_query})
             logger.debug(f"Retrieved docs: {retrieved_docs}")
         except Exception as e:
             logger.info(f"Error retrieving docs: {str(e)}")
@@ -204,7 +202,7 @@ def run_researcher(
             node_name="agent_2_node_a_retriever",
             execution_time_seconds=0,
             input=current_kws_str,
-            outcome=f"Query: {arxiv_query}\nDocs: {retrieved_docs}",
+            outcome=f"Query: {wiki_query}\nDocs: {retrieved_docs}",
             args={}
         ))
         node_order_inner += 1

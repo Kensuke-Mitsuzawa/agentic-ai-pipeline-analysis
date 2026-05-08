@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def load_mini_dataset(n: int = 10) -> List[str]:
     """
-    Mocking a HuggingFace ArxivQA dataset load for local prototype.
+    Mocking a generic QA dataset load for local prototype.
     In real HPC deployment, this uses `datasets.load_dataset`.
     """
     raw_questions = [
@@ -32,7 +32,7 @@ def load_mini_dataset(n: int = 10) -> List[str]:
     queries = []
     for q in raw_questions[:n]:
         context = PromptContext(
-            arxiv_id="2305.16300" if "transformers" in q.lower() else None,
+            context_id="Quantum_error_correction" if "quantum" in q.lower() else None,
             options=["Option A", "Option B"] if "quantum" in q.lower() else None,
             question=q
         )
@@ -79,7 +79,7 @@ def test_mini_dataset():
         assert r.success is True, f"Query {r.query_id} failed with error: {r.error}"
 
 def test_hf_dataset(n_samples: int = 15):
-    """Test mode 2: Test with the input from the Hugging face dataset MMInstruction/ArxivQA"""
+    """Test mode 2: Test with the input from the Hugging face dataset ai2_arc"""
     if os.environ.get("RUN_HF_DATASET_TEST") != "1":
         # This test requires HF datasets cache/network access on the host machine.
         # Keep it opt-in so the default test suite is offline-friendly.
@@ -90,18 +90,28 @@ def test_hf_dataset(n_samples: int = 15):
         logger.error("The 'datasets' package is required for this mode. Install via 'pip install datasets'.")
         return
         
-    logger.info("=== Running Test Mode 2: HuggingFace ArxivQA ===")
+    logger.info("=== Running Test Mode 2: HuggingFace sciq ===")
     logger.info("Loading dataset from HuggingFace...")
-    dataset = load_dataset("MMInstruction/ArxivQA", split="train")
+    dataset = load_dataset("sciq", split="test")
     
     # We construct PromptContext for each sample
     queries = []
     subset = dataset.select(range(min(n_samples, len(dataset))))
     for item in subset:
+        # SciQ has distractor1, distractor2, distractor3 and correct_answer
+        options = [
+            item.get("correct_answer", ""),
+            item.get("distractor1", ""),
+            item.get("distractor2", ""),
+            item.get("distractor3", "")
+        ]
+        options = [o for o in options if o]
+        import hashlib
+        question = item.get("question", "")
         context = PromptContext(
-            arxiv_id=item.get("arxiv_id"),
-            options=item.get("options"),
-            question=item.get("question", "")
+            context_id=hashlib.md5(question.encode()).hexdigest()[:10],
+            options=options,
+            question=question
         )
         queries.append(context.model_dump_json())
     output_dir = Path("./pipeline_outcomes_hf")
@@ -137,13 +147,6 @@ def test_hf_dataset(n_samples: int = 15):
         assert r.success is True, f"Query {r.query_id} failed with error: {r.error}"
 
 if __name__ == "__main__":
-    # parser = argparse.ArgumentParser(description="Run the Agentic AI CKA Analysis Pipeline")
-    # parser.add_argument("--mode", type=str, choices=["mini", "hf"], default="mini", 
-    #                     help="Test mode to run: 'mini' for local mock data or 'hf' for HuggingFace ArxivQA dataset.")
-    # parser.add_argument("--n_samples", type=int, default=15, 
-    #                     help="Number of samples to run when using the 'hf' mode.")
-    # args = parser.parse_args()
-    
     # Configure root logger to output INFO to console, and DEBUG to a file
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
@@ -165,8 +168,3 @@ if __name__ == "__main__":
     root_logger.addHandler(file_handler)
     
     test_mini_dataset()
-    
-    # if args.mode == "mini":
-    #     test_mini_dataset()
-    # elif args.mode == "hf":
-    #     test_hf_dataset(n_samples=args.n_samples)

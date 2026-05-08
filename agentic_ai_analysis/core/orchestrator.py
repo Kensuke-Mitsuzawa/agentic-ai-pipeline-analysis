@@ -52,7 +52,7 @@ def process_single_query(
     try:
         logger.info("Running researcher...")
         # Agent 2: Researcher (Modular State-Machine Workflow)
-        # Researcher handles the structured JSON itself to get Arxiv IDs
+        # Researcher handles the structured JSON itself to get context IDs
         with tracer.span(trace, name="agent_2_researcher", input=query):
             researcher_data = run_researcher(query, node_order=0, generation_parameters=generation_parameters)
         extracted_docs = researcher_data.outcome
