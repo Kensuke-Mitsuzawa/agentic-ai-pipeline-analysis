@@ -1,6 +1,13 @@
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Union, Optional
 
+
+class PromptContext(BaseModel):
+	arxiv_id: Optional[str] = None
+	options: Optional[List[str]] = None
+	question: str
+
+
 class BaseNodeOutcome(BaseModel):
 	node_order: int
 	node_name: str

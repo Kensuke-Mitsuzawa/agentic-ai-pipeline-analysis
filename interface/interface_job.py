@@ -26,6 +26,7 @@ env_config = EnvConfig.load(_early_args.env_file)
 from agentic_ai_analysis.main import run_evaluation_pipeline
 from agentic_ai_analysis.core.configs_hpc import SubmititSystemConfig
 from agentic_ai_analysis.core.local_server import LocalServerConfig, LLMClientConfig, start_local_server as _start_local_server
+from agentic_ai_analysis.agents.data_models import PromptContext
 
 
 logger = logging.getLogger()
@@ -74,8 +75,18 @@ def load_dataset(dataset_name: str, split: str, n_samples: int) -> ty.List[str]:
     logger.info("Loading dataset from HuggingFace...")
     dataset = hf_load_dataset(dataset_name, split=split)
     
-    # We use the 'question' column from the dataset as the query
-    queries = dataset["question"][:n_samples]
+    # We construct a PromptContext for richer context in the pipeline
+    queries = []
+    subset = dataset.select(range(min(n_samples, len(dataset))))
+    for item in subset:
+        # We store as a JSON string of PromptContext so it's easily serializable 
+        # and compatible with the existing pipeline orchestration.
+        context = PromptContext(
+            arxiv_id=item.get("arxiv_id"),
+            options=item.get("options"),
+            question=item.get("question", "")
+        )
+        queries.append(context.model_dump_json())
 
     return queries
 

@@ -16,7 +16,8 @@ AcceptableLLMs = Literal[
     "mistralai/Mistral-7B-Instruct-v0.2",
     "Qwen/Qwen3.5-27B-FP8", 
     "Qwen/Qwen3.5-14B", 
-    "default"
+    "default",
+    "dummy"
 ]
 
 class LLMClientConfig(BaseModel):

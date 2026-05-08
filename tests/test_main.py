@@ -7,6 +7,7 @@ import os
 from agentic_ai_analysis.main import run_evaluation_pipeline
 from agentic_ai_analysis.core.local_server import LocalServerConfig
 from agentic_ai_analysis.core.configs_hpc import SubmititSystemConfig, SubmititProfile
+from agentic_ai_analysis.agents.data_models import PromptContext
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ def load_mini_dataset(n: int = 10) -> List[str]:
     Mocking a HuggingFace ArxivQA dataset load for local prototype.
     In real HPC deployment, this uses `datasets.load_dataset`.
     """
-    return [
+    raw_questions = [
         "What are the recent advancements in quantum error correction?",
         "Can you explain the difference between LoRA and QLoRA for LLM fine-tuning?",
         "How do transformers handle long context windows efficiently?",
@@ -26,7 +27,17 @@ def load_mini_dataset(n: int = 10) -> List[str]:
         "Explain the mechanism of flash attention.",
         "How does federated learning ensure data privacy?",
         "What is the state-of-the-art in text-to-video generation?"
-    ][:n]
+    ]
+    
+    queries = []
+    for q in raw_questions[:n]:
+        context = PromptContext(
+            arxiv_id="2305.16300" if "transformers" in q.lower() else None,
+            options=["Option A", "Option B"] if "quantum" in q.lower() else None,
+            question=q
+        )
+        queries.append(context.model_dump_json())
+    return queries
 
 def test_mini_dataset():
     """Test mode 1: Test with the input from `load_mini_dataset()`"""
@@ -83,8 +94,16 @@ def test_hf_dataset(n_samples: int = 15):
     logger.info("Loading dataset from HuggingFace...")
     dataset = load_dataset("MMInstruction/ArxivQA", split="train")
     
-    # We use the 'question' column from the dataset as the query
-    queries = dataset["question"][:n_samples]
+    # We construct PromptContext for each sample
+    queries = []
+    subset = dataset.select(range(min(n_samples, len(dataset))))
+    for item in subset:
+        context = PromptContext(
+            arxiv_id=item.get("arxiv_id"),
+            options=item.get("options"),
+            question=item.get("question", "")
+        )
+        queries.append(context.model_dump_json())
     output_dir = Path("./pipeline_outcomes_hf")
     
     server_config = LocalServerConfig(
