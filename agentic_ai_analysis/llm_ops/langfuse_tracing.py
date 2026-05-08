@@ -68,6 +68,9 @@ class _NoopTracer:
     def score(self, trace: TraceHandle, *, name: str, value: float, comment: Optional[str] = None) -> None:
         return
 
+    def flush(self) -> None:
+        return
+
 
 class _LangfuseTracer:
     def __init__(self, settings: LangfuseSettings):
@@ -101,6 +104,9 @@ class _LangfuseTracer:
         if trace._trace is None:
             return
         trace._trace.score(name=name, value=value, comment=comment)
+
+    def flush(self) -> None:
+        self._client.flush()
 
 
 _TRACER_SINGLETON: Any = None

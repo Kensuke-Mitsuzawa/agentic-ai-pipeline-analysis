@@ -17,5 +17,5 @@ n_gpus_per_task = 1
 gres = "gpu:1"
 
 [llm_client]
-openai_api_base = "localhost:8000"
+openai_api_base = "http://localhost:8000/v1/"
 model = "default"

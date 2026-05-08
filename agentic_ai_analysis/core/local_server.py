@@ -18,7 +18,10 @@ AcceptableLLMs = Literal[
     "microsoft/Phi-3.5-mini-instruct",
     "mistralai/Mistral-Nemo-Instruct-2407",
     "mistralai/Mistral-7B-Instruct-v0.2",
-    "default"
+    "Qwen/Qwen3.5-27B-FP8", 
+    "Qwen/Qwen3.5-14B", 
+    "default",
+    "dummy"
 ]
 
 class LLMClientConfig(BaseModel):
@@ -30,6 +33,7 @@ class LocalServerConfig(BaseModel):
     model_id: AcceptableLLMs = "Qwen/Qwen2.5-7B-Instruct"
     port: int = 8000
     host: str = "127.0.0.1"
+    start: bool = Field(default=False, description="If true, launch the local server process/thread.")
     # Default 4-bit quantization configuration for optimized local inference
     quantization_config_dict: Dict[str, Any] = Field(
         default_factory=lambda: {

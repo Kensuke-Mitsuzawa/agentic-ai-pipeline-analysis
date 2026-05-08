@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Optional, NamedTuple, Union, Optional
 
 # Agent imports
 from ..agents import data_models
+from ..agents.data_models import PromptContext
 from agentic_ai_analysis.agents.researcher import run_researcher
 from agentic_ai_analysis.agents.distractor import run_distractor
 from agentic_ai_analysis.agents.judge import run_judge
@@ -39,9 +40,19 @@ def process_single_query(
     tracer = get_tracer()
     trace = tracer.start_trace(trace_id=query_id, name="rag_pipeline", input=query, metadata={})
 
+    # Extract the effective question for subsequent agents if the query is a PromptContext JSON
+    try:
+        context = PromptContext.model_validate_json(query)
+        effective_query = context.question
+        if context.options:
+            effective_query += f" Options: {context.options}"
+    except Exception:
+        effective_query = query
+
     try:
         logger.info("Running researcher...")
         # Agent 2: Researcher (Modular State-Machine Workflow)
+        # Researcher handles the structured JSON itself to get Arxiv IDs
         with tracer.span(trace, name="agent_2_researcher", input=query):
             researcher_data = run_researcher(query, node_order=0, generation_parameters=generation_parameters)
         extracted_docs = researcher_data.outcome
@@ -51,14 +62,14 @@ def process_single_query(
         # Agent 3: Distractor
         logger.info("Running distractor...")        
         start = time.perf_counter()
-        with tracer.span(trace, name="agent_3_distractor", input=query):
-            distractor_fact = run_distractor(query, generation_parameters=generation_parameters)
+        with tracer.span(trace, name="agent_3_distractor", input=effective_query):
+            distractor_fact = run_distractor(effective_query, generation_parameters=generation_parameters)
         t_distractor = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=1,
             node_name="agent_3_distractor",
             execution_time_seconds=t_distractor,
-            input=query,
+            input=effective_query,
             outcome=distractor_fact,
             args={}
         ))
@@ -66,8 +77,8 @@ def process_single_query(
         # Agent 4: Judge (Evaluate 1) On retrieved context
         logger.info("Running judge...")
         start = time.perf_counter()
-        with tracer.span(trace, name="agent_4_judge_docs", input={"query": query, "context": extracted_docs}):
-            judge_xml_docs, parsed_docs = run_judge(query, extracted_docs, generation_parameters=generation_parameters)
+        with tracer.span(trace, name="agent_4_judge_docs", input={"query": effective_query, "context": extracted_docs}):
+            judge_xml_docs, parsed_docs = run_judge(effective_query, extracted_docs, generation_parameters=generation_parameters)
         t_judge1 = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=2,
@@ -81,8 +92,8 @@ def process_single_query(
         # Agent 4: Judge (Evaluate 2) On distractor context
         logger.info("Running judge...")
         start = time.perf_counter()
-        with tracer.span(trace, name="agent_4_judge_distractor", input={"query": query, "context": distractor_fact}):
-            judge_xml_distractor, parsed_distractor = run_judge(query, distractor_fact, generation_parameters=generation_parameters)
+        with tracer.span(trace, name="agent_4_judge_distractor", input={"query": effective_query, "context": distractor_fact}):
+            judge_xml_distractor, parsed_distractor = run_judge(effective_query, distractor_fact, generation_parameters=generation_parameters)
         t_judge2 = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=3,
@@ -103,8 +114,8 @@ def process_single_query(
             valid_explanations.append(parsed_distractor["explanation"])
             
         start = time.perf_counter()
-        with tracer.span(trace, name="agent_5_final", input={"query": query, "contexts": valid_explanations}):
-            final_answer = run_synthesizer(query, valid_explanations, generation_parameters=generation_parameters)
+        with tracer.span(trace, name="agent_5_final", input={"query": effective_query, "contexts": valid_explanations}):
+            final_answer = run_synthesizer(effective_query, valid_explanations, generation_parameters=generation_parameters)
         t_synth = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=4,
@@ -149,7 +160,7 @@ class WorkerFunctionArgs(NamedTuple):
     query_id: str
     log_folder: Path
     chunk_idx: int
-    server_config: LocalServerConfig
+    server_config: Optional[LocalServerConfig]
     generation_parameters: Optional[Any] = None
 
 
@@ -165,9 +176,10 @@ def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
     logger = logging.getLogger(__name__)
     logger.info(f"Processing query {args.query_id}: {args.query}")
 
-    logger.info("Starting a server...")
-    start_local_server(config=args.server_config)
-    logger.info("The server is ready.")
+    if args.server_config is not None:
+        logger.info("Starting a local server...")
+        start_local_server(config=args.server_config)
+        logger.info("The local server is ready.")
 
     result = process_single_query(args.query, args.query_id, args.generation_parameters) 
     # Save results for each query in the chunk
@@ -189,8 +201,9 @@ def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
         )
     # end if
 
-    logger.info("Stopping local LLM server...")
-    stop_local_server()
+    if args.server_config is not None:
+        logger.info("Stopping local LLM server...")
+        stop_local_server()
 
     return envelope_obj
 
@@ -198,7 +211,7 @@ def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
 def run_orchestration(
     queries: List[str], 
     hpc_config: SubmititSystemConfig, 
-    local_server_config: LocalServerConfig,
+    local_server_config: Optional[LocalServerConfig],
     generation_parameters: Optional[Any] = None,
     profile_names: Optional[List[str]] = None) -> List[Any]:
     """

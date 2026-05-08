@@ -1,12 +1,14 @@
 import logging
 import time
 import json
+import ast
 from typing import Dict, Any, List, TypedDict, Optional
 
 from langchain_core.prompts import PromptTemplate
 from agentic_ai_analysis.core.llm_client import get_llm
 from langchain_community.tools.arxiv.tool import ArxivQueryRun
-from .data_models import ResearcherNodeOutcome, BaseNodeOutcome
+from langchain_community.utilities import ArxivAPIWrapper
+from .data_models import ResearcherNodeOutcome, BaseNodeOutcome, PromptContext
 
 
 logger = logging.getLogger(__name__)
@@ -17,6 +19,50 @@ PossibleNodeNmaes = [
     "agent_2_node_c_judge",
     "agent_2_researcher",
 ]
+
+
+def parse_structured_query(query: str):
+    """
+    Tries to parse the query as a PromptContext JSON or a tuple/list.
+    Returns (arxiv_id, options, question) or (None, [], query).
+    """
+    try:
+        # 1. Try to parse as PromptContext JSON (New preferred way)
+        context = PromptContext.model_validate_json(query)
+        return context.arxiv_id, context.options or [], context.question
+    except Exception:
+        pass
+
+    try:
+        # 2. Try as python literal (handles tuples/lists in string form)
+        parsed = ast.literal_eval(query)
+        if isinstance(parsed, (list, tuple)) and len(parsed) >= 3:
+            return str(parsed[0]), parsed[1], str(parsed[2])
+    except:
+        pass
+        
+    try:
+        # 3. Try to parse as raw JSON list
+        data = json.loads(query)
+        if isinstance(data, list) and len(data) >= 3:
+            return str(data[0]), data[1], str(data[2])
+    except:
+        pass
+        
+    return None, [], query
+
+
+def fetch_arxiv_abstract(arxiv_id: str) -> str:
+    """
+    Fetches the abstract of a paper from Arxiv using its ID.
+    """
+    arxiv = ArxivAPIWrapper()
+    try:
+        # ArxivAPIWrapper.run with an ID returns the paper summary
+        return arxiv.run(arxiv_id)
+    except Exception as e:
+        logger.error(f"Failed to fetch Arxiv abstract for {arxiv_id}: {e}")
+        return ""
 
 
 class ResearcherState(TypedDict):
@@ -43,19 +89,52 @@ def run_researcher(
     llm = get_llm(generation_parameters=generation_parameters)
     arxiv_tool = ArxivQueryRun()
 
-    # Initial Extraction (replaces standalone extract_keywords)
-    init_extract_prompt = PromptTemplate.from_template(
-        "You are a helpful academic keyword extractor. "
-        "Given the user prompt, extract the most important keywords and return ONLY a comma-separated list.\n"
-        "Do not provide any conversational text or explanation.\n\n"
-        "Prompt: {prompt}\nKeywords:"
-    )
+    # Parse structured input
+    arxiv_id, options, question = parse_structured_query(user_query)
+    abstract = ""
+    if arxiv_id:
+        abstract = fetch_arxiv_abstract(arxiv_id)
+        if abstract:
+            logger.info(f"Successfully fetched abstract for paper {arxiv_id}")
+        else:
+            logger.warning(f"Could not fetch abstract for paper {arxiv_id}")
+
+    # Initial Extraction
+    if abstract:
+        init_extract_prompt = PromptTemplate.from_template(
+            "You are a helpful academic keyword extractor.\n"
+            "Below is the abstract of an Arxiv paper and a question about it.\n\n"
+            "Abstract: {abstract}\n\n"
+            "Question: {question}\n"
+            "Options: {options}\n\n"
+            "Extract the most important keywords to search for additional research papers that would help answer the question accurately.\n"
+            "Return ONLY a comma-separated list of keywords.\n"
+            "Do not provide any conversational text or explanation.\n\n"
+            "Keywords:"
+        )
+        prompt_vars = {
+            "abstract": abstract,
+            "question": question,
+            "options": str(options)
+        }
+    else:
+        init_extract_prompt = PromptTemplate.from_template(
+            "You are a helpful academic keyword extractor. "
+            "Given the user prompt, extract the most important keywords and return ONLY a comma-separated list.\n"
+            "Do not provide any conversational text or explanation.\n\n"
+            "Prompt: {prompt}\nKeywords:"
+        )
+        prompt_vars = {"prompt": user_query}
+
     init_chain = init_extract_prompt | llm
-    init_kws_str = str(init_chain.invoke({"prompt": user_query}).content).strip()
+    init_kws_str = str(init_chain.invoke(prompt_vars).content).strip()
     logger.info(f"Initial keywords: {init_kws_str}")
     
+    # We enrich the internal user_query with options for better filtering/judging
+    effective_query = f"{question} Options: {options}" if options else (question if arxiv_id else user_query)
+
     state: ResearcherState = {
-        "user_query": user_query,
+        "user_query": effective_query,
         "search_keywords": [k.strip() for k in init_kws_str.split(",") if k.strip()],
         "raw_documents": [],
         "filtered_tuples": [],
