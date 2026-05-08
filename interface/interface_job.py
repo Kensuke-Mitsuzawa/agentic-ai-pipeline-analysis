@@ -34,6 +34,7 @@ from agentic_ai_analysis.core.llm_client import LlmGenerationParameters
 from agentic_ai_analysis.agents.data_models import PromptContext
 
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
 
