@@ -31,7 +31,14 @@ class SlurmSystemConfig(BaseModel):
         description="Configuration for dispatching specific estimators"
     )
 
-    default_profiles: ty.List[str] = Field(description="Fallback profile name(s) if model is not in map")
+    # Backward-compatible with earlier config shape used in tests/examples.
+    # - Older code used `default_profile="local"` (singular string)
+    # - Current code uses `default_profiles=["local"]` (list[str])
+    default_profiles: ty.List[str] = Field(
+        description="Fallback profile name(s) if model is not in map",
+        default_factory=list,
+        validation_alias="default_profile",
+    )
 
     is_delete_worker_output: bool = Field(description="True then the pipeline deletes the worker's temporary outcome.", default=True)
     is_download_resources_prepost: bool = Field(default=True, description="Downloading the model resources before launching estimators' worker nodes.")
@@ -44,6 +51,11 @@ class SlurmSystemConfig(BaseModel):
         """Ensure all mapped profiles actually exist."""
         # Normalize to list for validation
         defs = self.default_profiles
+        if isinstance(defs, str):  # type: ignore[unreachable]
+            defs = [defs]
+            self.default_profiles = defs
+        if not defs:
+            raise ValueError("default_profiles must not be empty.")
         for d in defs:
             if d not in self.profiles:
                 raise ValueError(f"Default profile '{d}' not found in profiles.")

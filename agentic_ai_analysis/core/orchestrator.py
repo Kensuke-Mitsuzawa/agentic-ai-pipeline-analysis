@@ -197,6 +197,22 @@ def run_orchestration(
 
     profiles = [hpc_config.profiles[p] for p in profile_names]
 
+    # Local fallback for CPU dev/test environments (no Slurm required).
+    # If the selected profiles are exactly ["local"], run sequentially in-process.
+    if profile_names == ["local"]:
+        all_results: list[WorkerEnvelope] = []
+        for chunk_idx, q in enumerate(queries):
+            _query_id = hashlib.sha256(q.encode("utf-8")).hexdigest()
+            _worker_func_args = WorkerFunctionArgs(
+                query=q,
+                query_id=_query_id,
+                log_folder=log_folder,
+                chunk_idx=chunk_idx,
+                server_config=local_server_config,
+            )
+            all_results.append(main_worker(_worker_func_args))
+        return all_results
+
     # 1. Distribute queries proportionally across the chosen profiles based on node budget
     total_budget = sum(p.n_nodes_budget for p in profiles)
     if total_budget == 0: 

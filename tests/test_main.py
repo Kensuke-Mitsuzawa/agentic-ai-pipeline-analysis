@@ -34,12 +34,9 @@ def test_mini_dataset():
     output_dir = Path("./pipeline_outcomes_mini")
     
     server_config = LocalServerConfig(
-        model_id="Qwen/Qwen2.5-3B-Instruct", # Super small model for fast test bootup
+        model_id="sshleifer/tiny-gpt2",  # Tiny CPU-friendly model for test
         port=8000,
-        quantization_config_dict=dict(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype="float16")
+        quantization_config_dict=None,
     )
 
     hpc_config = SlurmSystemConfig(
@@ -52,9 +49,9 @@ def test_mini_dataset():
                 n_nodes_budget=1,
                 n_tasks_per_node=1,
                 n_cpus_per_task=1,
-                n_gpus_per_task=1,
-                gres="gpu:1",
-                mem_per_gpu="16G",
+                n_gpus_per_task=0,
+                gres=None,
+                mem_per_gpu="1G",
             )
         }
     )
