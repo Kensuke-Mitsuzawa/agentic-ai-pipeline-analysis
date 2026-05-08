@@ -6,18 +6,26 @@ import multiprocessing
 import threading
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional, Literal
 
 logger = logging.getLogger(__name__)
 
+
+AcceptableLLMs = Literal[
+    "mistralai/Mistral-7B-Instruct-v0.2",
+    "Qwen/Qwen3.5-27B-FP8", 
+    "Qwen/Qwen3.5-14B", 
+    "default"
+]
+
 class LLMClientConfig(BaseModel):
     openai_api_base: str = Field(..., description="The base URL of the OpenAI API.")
-    model: str = "default"
+    model: AcceptableLLMs = "default"
 
 
 class LocalServerConfig(BaseModel):
-    model_id: str = "mistralai/Mistral-7B-Instruct-v0.2"
+    model_id: AcceptableLLMs = "mistralai/Mistral-7B-Instruct-v0.2"
     port: int = 8000
     host: str = "127.0.0.1"
     # We store the config as a dictionary to avoid Pydantic validation issues with the transformers object
@@ -26,6 +34,9 @@ class LocalServerConfig(BaseModel):
 
 # Global pipeline instance for the worker process
 _pipeline = None
+_current_config: Optional[LocalServerConfig] = None
+_default_model_id: Optional[str] = None
+_reload_lock = threading.Lock()
 
 class _DummyPipeline:
     def __init__(self):
@@ -36,16 +47,31 @@ class _DummyPipeline:
         text = "DUMMY_RESPONSE"
         return [{"generated_text": text}]
 
-def init_pipeline(config_json: str):
+def init_pipeline(config: LocalServerConfig):
     """
     Initializes the HuggingFace pipeline in the worker process.
     """
-    global _pipeline
-    config = LocalServerConfig.model_validate_json(config_json)
+    global _pipeline, _current_config, _default_model_id
     
-    if config.model_id == "dummy":
+    # Cleanup previous model if exists
+    if _pipeline is not None:
+        logger.info("Cleaning up previous model...")
+        _pipeline = None
+        import gc
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+
+    if config.model_id.startswith("dummy"):
         _pipeline = _DummyPipeline()
-        logger.info("Initialized dummy pipeline (no HF downloads).")
+        _current_config = config
+        if _default_model_id is None:
+            _default_model_id = config.model_id
+        logger.info(f"Initialized dummy pipeline for {config.model_id} (no HF downloads).")
         return
 
     import torch
@@ -81,7 +107,10 @@ def init_pipeline(config_json: str):
         max_new_tokens=512,
         return_full_text=False
     )
-    logger.info("Model loaded successfully.")
+    _current_config = config
+    if _default_model_id is None:
+        _default_model_id = config.model_id
+    logger.info(f"Model {config.model_id} loaded successfully.")
 
 app = FastAPI()
 
@@ -134,6 +163,24 @@ async def chat_completions(request: Request):
         raise HTTPException(status_code=503, detail="Model not loaded yet")
         
     data = await request.json()
+    requested_model = data.get("model", "default")
+
+    # Check if we need to reload
+    if _current_config is not None:
+        target_model_id = _default_model_id if requested_model == "default" else requested_model
+        
+        if target_model_id != _current_config.model_id:
+            logger.info(f"Request for model '{requested_model}' triggers reload. Current: '{_current_config.model_id}', Target: '{target_model_id}'")
+            with _reload_lock:
+                # Check again inside lock
+                if target_model_id != _current_config.model_id:
+                    new_config = _current_config.model_copy()
+                    new_config.model_id = target_model_id
+                    try:
+                        init_pipeline(new_config)
+                    except Exception as e:
+                        logger.error(f"Failed to reload model {target_model_id}: {e}")
+                        raise HTTPException(status_code=500, detail=f"Failed to reload model: {e}")
     messages = data.get("messages", [])
     
     if not messages:
@@ -190,7 +237,7 @@ def _run_server(
     try:
         # Initialize the model before starting the server so health-check is truthful
         config = LocalServerConfig.model_validate_json(config_json)
-        init_pipeline(config_json)
+        init_pipeline(config)
         # Return the status of the launching server.
         uvicorn.run(app, host=config.host, port=config.port, log_level="warning")
     except Exception as e:
@@ -215,7 +262,7 @@ class LocalServerManager:
         # Dummy/offline mode: run uvicorn in-process thread (no signals required to stop).
         if self.config.model_id == "dummy":
             try:
-                init_pipeline(self.config.model_dump_json())
+                init_pipeline(self.config)
             except Exception as e:
                 raise RuntimeError(f"Dummy local server failed to init pipeline: {e}") from e
 
