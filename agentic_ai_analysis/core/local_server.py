@@ -28,6 +28,7 @@ class LocalServerConfig(BaseModel):
     model_id: AcceptableLLMs = "mistralai/Mistral-7B-Instruct-v0.2"
     port: int = 8000
     host: str = "127.0.0.1"
+    start: bool = Field(default=False, description="If true, launch the local server process/thread.")
     # We store the config as a dictionary to avoid Pydantic validation issues with the transformers object
     # In practice this should be a dictionary representing the kwargs for BitsAndBytesConfig
     quantization_config_dict: Optional[Dict[str, Any]] = None

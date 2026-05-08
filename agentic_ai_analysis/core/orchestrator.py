@@ -146,7 +146,7 @@ class WorkerFunctionArgs(NamedTuple):
     query_id: str
     log_folder: Path
     chunk_idx: int
-    server_config: LocalServerConfig
+    server_config: Optional[LocalServerConfig]
 
 
 class WorkerEnvelope(NamedTuple):
@@ -161,9 +161,10 @@ def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
     logger = logging.getLogger(__name__)
     logger.info(f"Processing query {args.query_id}: {args.query}")
 
-    logger.info("Starting a server...")
-    start_local_server(config=args.server_config)
-    logger.info("The server is ready.")
+    if args.server_config is not None:
+        logger.info("Starting a local server...")
+        start_local_server(config=args.server_config)
+        logger.info("The local server is ready.")
 
     result = process_single_query(args.query, args.query_id) 
     # Save results for each query in the chunk
@@ -185,8 +186,9 @@ def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
         )
     # end if
 
-    logger.info("Stopping local LLM server...")
-    stop_local_server()
+    if args.server_config is not None:
+        logger.info("Stopping local LLM server...")
+        stop_local_server()
 
     return envelope_obj
 
@@ -194,7 +196,7 @@ def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
 def run_orchestration(
     queries: List[str], 
     hpc_config: SubmititSystemConfig, 
-    local_server_config: LocalServerConfig,
+    local_server_config: Optional[LocalServerConfig],
     profile_names: Optional[List[str]] = None) -> List[Any]:
     """
     Uses submitit to dispatch tasks across one or multiple heterogeneous SLURM partitions.

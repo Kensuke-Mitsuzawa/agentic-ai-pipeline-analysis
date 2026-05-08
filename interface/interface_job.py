@@ -1,25 +1,31 @@
+"""CLI entrypoint for running the pipeline with a TOML config.
+
+This script loads a config file (e.g. `interface/app_configs/config_local.toml`),
+optionally launches a local OpenAI-compatible LLM server, and then runs the
+pipeline against a dataset.
+"""
+
 import os
 import argparse
-import sys
+import typing as ty
 import logging
 import tomllib
 from pathlib import Path
-from pydantic import BaseModel
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 
 # Early loading of dotenv so that env vars like HF_HOME are set before HF libraries are imported
 _early_parser = argparse.ArgumentParser(add_help=False)
 _early_parser.add_argument('-e', '--env_file', type=str, default='.env')
 _early_args, _ = _early_parser.parse_known_args()
 load_dotenv(_early_args.env_file, override=True)
-
 print(f"HF_HOME: {os.environ.get('HF_HOME')}")
+from agentic_ai_analysis.env_object import EnvConfig
+env_config = EnvConfig.load(_early_args.env_file)
+
 from agentic_ai_analysis.main import run_evaluation_pipeline
 from agentic_ai_analysis.core.configs_hpc import SubmititSystemConfig
-from agentic_ai_analysis.core.local_server import (
-    LocalServerConfig,
-    LLMClientConfig
-)
+from agentic_ai_analysis.core.local_server import LocalServerConfig, LLMClientConfig, start_local_server as _start_local_server
 
 
 logger = logging.getLogger()
@@ -27,17 +33,22 @@ logger = logging.getLogger()
 
 class InterfaceJobConfig(BaseModel):
     submitit_system: SubmititSystemConfig
-    local_server: LocalServerConfig
     llm_client: LLMClientConfig
+    local_server: ty.Optional[LocalServerConfig] = Field(default=None)
 
 
-def start_local_server(server_config: LocalServerConfig):
-    # If you're using a port-forwarded *remote* server (already running at localhost:8000),
-    # we should NOT attempt to start a local HF server. Make it opt-in via config:
-    #   [local_server]
-    #   start = true
-    should_start_local_server = bool(server_config.get("start", False))
-    server_config = LocalServerConfig(**server_config) if (server_config and should_start_local_server) else None
+def maybe_start_local_server(server_config: ty.Optional[LocalServerConfig]) -> bool:
+    """
+    Returns True if a local server was started.
+    By default we assume the LLM server is already running (e.g., port-forward to remote).
+    """
+    if server_config is None:
+        return False
+    should_start = bool(getattr(server_config, "start", False))
+    if not should_start:
+        return False
+    _start_local_server(server_config)
+    return True
 
 
 def load_dataset(dataset_name: str, split: str, n_samples: int) -> ty.List[str]:
@@ -47,14 +58,14 @@ def load_dataset(dataset_name: str, split: str, n_samples: int) -> ty.List[str]:
     """
     logger.info("=== Running HuggingFace ArxivQA ===")
     try:
-        from datasets import load_dataset
+        from datasets import load_dataset as hf_load_dataset
     except ImportError:
         logger.error("The 'datasets' package is required. Install via 'uv pip install datasets'.")
-        return
+        return []
     # end try
 
     logger.info("Loading dataset from HuggingFace...")
-    dataset = load_dataset("MMInstruction/ArxivQA", split="train")
+    dataset = hf_load_dataset(dataset_name, split=split)
     
     # We use the 'question' column from the dataset as the query
     queries = dataset["question"][:n_samples]
@@ -81,15 +92,15 @@ def main():
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found at {config_path}")
         
-    logger.info(f"Loading configuration from {config_path}")
+    logger.info("Loading configuration from %s", config_path)
     with open(config_path, "rb") as f:
         config_dict = tomllib.load(f)
         
-    job_config = InterfaceJobConfig(**config_dict)
+    job_config = InterfaceJobConfig.model_validate(config_dict)
     
     hpc_config = job_config.submitit_system
 
-    start_local_server(job_config.local_server)
+    started_local = maybe_start_local_server(job_config.local_server)
 
     os.environ["OPENAI_API_BASE"] = str(job_config.llm_client.openai_api_base)
     os.environ["OPENAI_MODEL"] = str(job_config.llm_client.model)
@@ -99,11 +110,11 @@ def main():
     queries = load_dataset(dataset_name="MMInstruction/ArxivQA", split="train", n_samples=args.n_samples)
     
     logger.info("Invoking run_evaluation_pipeline...")
-    results = run_evaluation_pipeline(
+    run_evaluation_pipeline(
         queries=queries, 
         output_dir=output_dir, 
         hpc_config=hpc_config, 
-        server_config=job_config.local_server
+        server_config=job_config.local_server if started_local else None
     )
     # end try
     logger.info("Pipeline completed successfully.")
