@@ -11,6 +11,11 @@ from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+class LLMClientConfig(BaseModel):
+    openai_api_base: str = Field(..., description="The base URL of the OpenAI API.")
+    model: str = "default"
+
+
 class LocalServerConfig(BaseModel):
     model_id: str = "mistralai/Mistral-7B-Instruct-v0.2"
     port: int = 8000

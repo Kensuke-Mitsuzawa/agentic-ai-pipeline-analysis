@@ -16,12 +16,6 @@ n_cpus_per_task = 1
 n_gpus_per_task = 1
 gres = "gpu:1"
 
-[local_server]
-model_id = "Qwen/Qwen2.5-3B-Instruct"
-port = 8000
-
-[local_server.quantization_config_dict]
-load_in_4bit = true
-bnb_4bit_quant_type = "nf4"
-bnb_4bit_compute_dtype = "float16"
-
+[llm_client]
+openai_api_base = "localhost:8000"
+model = "default"
