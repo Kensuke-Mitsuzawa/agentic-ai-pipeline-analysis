@@ -89,7 +89,7 @@ def load_dataset(dataset_name: str, split: str, n_samples: int) -> ty.List[str]:
         # We store as a JSON string of PromptContext so it's easily serializable 
         # and compatible with the existing pipeline orchestration.
         context = PromptContext(
-            arxiv_id=item.get("arxiv_id"),
+            arxiv_id=item.get("id"),
             options=item.get("options"),
             question=item.get("question", "")
         )

@@ -77,7 +77,8 @@ def run_researcher(
     user_query: str,
     node_order: int = 0, 
     max_depth: int = 3,
-    generation_parameters: Optional[Any] = None) -> ResearcherNodeOutcome:
+    generation_parameters: Optional[Any] = None,
+    n_keyword_extraction: int = 5) -> ResearcherNodeOutcome:
     """
     Agent 2: Modular State-Machine Researcher.
     Uses Nodes A (Retriever), B (Filter), C (Judge) to iteratively
@@ -87,7 +88,8 @@ def run_researcher(
 
     start_time = time.perf_counter()
     llm = get_llm(generation_parameters=generation_parameters)
-    arxiv_tool = ArxivQueryRun()
+    arxiv_tool = ArxivQueryRun(api_wrapper=ArxivAPIWrapper(top_k_results=10))
+    logger.info(f"DEBUG: Arxiv tool top_k_results: {arxiv_tool.api_wrapper.top_k_results}")
 
     # Parse structured input
     arxiv_id, options, question = parse_structured_query(user_query)
@@ -107,7 +109,7 @@ def run_researcher(
             "Abstract: {abstract}\n\n"
             "Question: {question}\n"
             "Options: {options}\n\n"
-            "Extract the most important keywords to search for additional research papers that would help answer the question accurately.\n"
+            f"Extract the most important {n_keyword_extraction} keywords to search for additional research papers that would help answer the question accurately.\n"
             "Return ONLY a comma-separated list of keywords.\n"
             "Do not provide any conversational text or explanation.\n\n"
             "Keywords:"
@@ -120,7 +122,7 @@ def run_researcher(
     else:
         init_extract_prompt = PromptTemplate.from_template(
             "You are a helpful academic keyword extractor. "
-            "Given the user prompt, extract the most important keywords and return ONLY a comma-separated list.\n"
+            f"Given the user prompt, extract the most {n_keyword_extraction} important keywords and return ONLY a comma-separated list.\n"
             "Do not provide any conversational text or explanation.\n\n"
             "Prompt: {prompt}\nKeywords:"
         )
@@ -135,7 +137,7 @@ def run_researcher(
 
     state: ResearcherState = {
         "user_query": effective_query,
-        "search_keywords": [k.strip() for k in init_kws_str.split(",") if k.strip()],
+        "search_keywords": [k.strip() for k in init_kws_str.split(",") if k.strip()][:n_keyword_extraction],
         "raw_documents": [],
         "filtered_tuples": [],
         "iteration_count": 0
@@ -143,7 +145,7 @@ def run_researcher(
     
     # Prompts for Nodes
     query_prompt = PromptTemplate.from_template(
-        "Based on these keywords: {keywords}, formulate a single concise search query for Arxiv to find the most relevant papers. Only output the query string."
+        "Based on these keywords: {keywords}, formulate a single concise search query for Arxiv to find the 10 most relevant papers. Only output the query string."
     )
     
     filter_prompt = PromptTemplate.from_template(
