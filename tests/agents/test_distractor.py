@@ -4,7 +4,7 @@ from agentic_ai_analysis.core.local_server import LocalServerConfig, start_local
 
 def test_distractor():
     server_config = LocalServerConfig(
-        model_id="sshleifer/tiny-gpt2",  # Tiny CPU-friendly model for test
+        model_id="dummy",
         port=8000,
         quantization_config_dict=None,
     )

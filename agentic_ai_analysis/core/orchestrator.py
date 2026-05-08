@@ -19,6 +19,7 @@ from agentic_ai_analysis.agents.synthesizer import run_synthesizer
 from .local_server import start_local_server, stop_local_server, LocalServerConfig
 from .configs_hpc import SlurmSystemConfig
 import math
+from agentic_ai_analysis.llm_ops.langfuse_tracing import get_tracer
 
 
 logger = logging.getLogger(__name__)
@@ -32,10 +33,14 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
     """
     nodes: List[Any] = []
 
+    tracer = get_tracer()
+    trace = tracer.start_trace(trace_id=query_id, name="rag_pipeline", input=query, metadata={})
+
     try:
         logger.info("Running researcher...")
         # Agent 2: Researcher (Modular State-Machine Workflow)
-        researcher_data = run_researcher(query, node_order=0)
+        with tracer.span(trace, name="agent_2_researcher", input=query):
+            researcher_data = run_researcher(query, node_order=0)
         extracted_docs = researcher_data.outcome
 
         nodes.append(researcher_data)
@@ -43,7 +48,8 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
         # Agent 3: Distractor
         logger.info("Running distractor...")        
         start = time.perf_counter()
-        distractor_fact = run_distractor(query)
+        with tracer.span(trace, name="agent_3_distractor", input=query):
+            distractor_fact = run_distractor(query)
         t_distractor = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=1,
@@ -57,7 +63,8 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
         # Agent 4: Judge (Evaluate 1) On retrieved context
         logger.info("Running judge...")
         start = time.perf_counter()
-        judge_xml_docs, parsed_docs = run_judge(query, extracted_docs)
+        with tracer.span(trace, name="agent_4_judge_docs", input={"query": query, "context": extracted_docs}):
+            judge_xml_docs, parsed_docs = run_judge(query, extracted_docs)
         t_judge1 = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=2,
@@ -71,7 +78,8 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
         # Agent 4: Judge (Evaluate 2) On distractor context
         logger.info("Running judge...")
         start = time.perf_counter()
-        judge_xml_distractor, parsed_distractor = run_judge(query, distractor_fact)
+        with tracer.span(trace, name="agent_4_judge_distractor", input={"query": query, "context": distractor_fact}):
+            judge_xml_distractor, parsed_distractor = run_judge(query, distractor_fact)
         t_judge2 = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=3,
@@ -92,7 +100,8 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
             valid_explanations.append(parsed_distractor["explanation"])
             
         start = time.perf_counter()
-        final_answer = run_synthesizer(query, valid_explanations)
+        with tracer.span(trace, name="agent_5_final", input={"query": query, "contexts": valid_explanations}):
+            final_answer = run_synthesizer(query, valid_explanations)
         t_synth = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=4,
@@ -103,7 +112,7 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
             args={}
         ))
         
-        return data_models.PipelineOutcome(
+        outcome = data_models.PipelineOutcome(
             prompt=query,
             query_id=query_id,
             final_outcome=final_answer,
@@ -111,10 +120,13 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
             error=None,
             nodes={n.node_name: n for n in nodes}
         )
+        tracer.score(trace, name="pipeline_success", value=1.0)
+        return outcome
         
     except Exception as e:
         err_str = f"Error querying LLM: {str(e)}"
         logger.error(err_str)
+        tracer.score(trace, name="pipeline_success", value=0.0, comment=err_str)
 
         return None
 

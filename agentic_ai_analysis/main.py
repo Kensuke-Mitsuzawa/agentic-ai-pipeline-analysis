@@ -10,6 +10,8 @@ from .agents.data_models import PipelineOutcome
 from .core.orchestrator import run_orchestration
 from .core.llm_client import get_embeddings
 from .cka import compute_cka_agent_nodes
+from .llm_ops.langfuse_tracing import get_tracer
+from .llm_ops.evaluation.runner import evaluate_outcomes
 
 import pydantic
 
@@ -35,7 +37,9 @@ def run_evaluation_pipeline(
     queries: List[str],
     hpc_config: SlurmSystemConfig,
     output_dir: Path,
-    server_config: Optional[LocalServerConfig] = None
+    server_config: Optional[LocalServerConfig] = None,
+    evaluation_sampling_rate: float = 0.0,
+    compute_cka: bool = False,
 ):
     """
     The main reusable entrypoint function.
@@ -63,9 +67,26 @@ def run_evaluation_pipeline(
         path_results = [_obj.path_results for _obj in _seq_worker_envelopes if _obj.path_results is not None]
         pipeline_objects = load_results(path_results)
 
-        # logger.info("Computing metrics based on outcomes...")
-        # compute_cka_agent_nodes.compute_and_visualize_cka(pipeline_objects, output_dir)
-        # logger.info(f"Pipeline finished successfully. Outputs saved to {output_dir}")
+        # Optional quality evaluation (sampled) + Langfuse score logging.
+        if evaluation_sampling_rate > 0.0:
+            tracer = get_tracer()
+            eval_map = evaluate_outcomes(pipeline_objects, sampling_rate=evaluation_sampling_rate)
+            for qid, metrics in eval_map.items():
+                trace = tracer.start_trace(trace_id=qid, name="rag_pipeline", input="", metadata={})
+                for m in metrics:
+                    tracer.score(trace, name=m.name, value=m.value)
+
+        # Optional CKA metric reporting (custom metric).
+        if compute_cka:
+            tracer = get_tracer()
+            cka_matrix = compute_cka_agent_nodes.compute_and_visualize_cka(pipeline_objects, output_dir)
+            tri = np.tril(cka_matrix, k=-1)
+            vals = tri[tri != 0]
+            cka_mean = float(vals.mean()) if vals.size else 0.0
+            for o in pipeline_objects:
+                trace = tracer.start_trace(trace_id=o.query_id, name="rag_pipeline", input="", metadata={})
+                tracer.score(trace, name="cka_mean", value=cka_mean)
+
         return pipeline_objects
     except Exception as e:
         logger.error(f"{e}")

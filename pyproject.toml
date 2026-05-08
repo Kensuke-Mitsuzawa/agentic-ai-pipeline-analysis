@@ -29,7 +29,7 @@ dependencies = [
     "seaborn",
     "sentence-transformers>=5.2.3",
     "submitit>=1.5.4",
-    "vllm>=0.5.0.post1",
+    "vllm",
 ]
 
 [tool.hatch.build.targets.sdist]
@@ -42,3 +42,8 @@ include = [
 
 [tool.uv.sources]
 mmd-tst-variable-detector = { git = "https://github.com/Kensuke-Mitsuzawa/mmd-two-sample-test-variable-selection.git" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

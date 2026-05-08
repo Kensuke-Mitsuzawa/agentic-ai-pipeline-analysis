@@ -2,6 +2,7 @@ import logging
 import argparse
 from typing import List
 from pathlib import Path
+import os
 
 from agentic_ai_analysis.main import run_evaluation_pipeline
 from agentic_ai_analysis.core.local_server import LocalServerConfig
@@ -34,7 +35,7 @@ def test_mini_dataset():
     output_dir = Path("./pipeline_outcomes_mini")
     
     server_config = LocalServerConfig(
-        model_id="sshleifer/tiny-gpt2",  # Tiny CPU-friendly model for test
+        model_id="dummy",
         port=8000,
         quantization_config_dict=None,
     )
@@ -68,6 +69,10 @@ def test_mini_dataset():
 
 def test_hf_dataset(n_samples: int = 15):
     """Test mode 2: Test with the input from the Hugging face dataset MMInstruction/ArxivQA"""
+    if os.environ.get("RUN_HF_DATASET_TEST") != "1":
+        # This test requires HF datasets cache/network access on the host machine.
+        # Keep it opt-in so the default test suite is offline-friendly.
+        return
     try:
         from datasets import load_dataset
     except ImportError:
@@ -83,7 +88,7 @@ def test_hf_dataset(n_samples: int = 15):
     output_dir = Path("./pipeline_outcomes_hf")
     
     server_config = LocalServerConfig(
-        model_id="Qwen/Qwen2.5-3B-Instruct", # Super small model for fast test bootup
+        model_id="dummy",
         port=8000
     )
 
@@ -97,9 +102,9 @@ def test_hf_dataset(n_samples: int = 15):
                 n_nodes_budget=1,
                 n_tasks_per_node=1,
                 n_cpus_per_task=1,
-                n_gpus_per_task=1,
-                gres="gpu:1",
-                mem_per_gpu="16G",
+                n_gpus_per_task=0,
+                gres=None,
+                mem_per_gpu="1G",
             )
         }
     )
