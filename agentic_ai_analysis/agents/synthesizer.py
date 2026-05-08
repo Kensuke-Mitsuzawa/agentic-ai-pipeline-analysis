@@ -1,13 +1,15 @@
 from agentic_ai_analysis.core.llm_client import get_llm
 from langchain_core.prompts import PromptTemplate
 
-def run_synthesizer(original_prompt: str, judge_explanations: list[str]) -> str:
+from typing import Optional, Any
+
+def run_synthesizer(original_prompt: str, judge_explanations: list[str], generation_parameters: Optional[Any] = None) -> str:
     """
     Agent 5: Synthesizer Agent.
     Formulates the final expert answer using the original prompt and the filtered 
     explanations from the judge (which contain the filtered context).
     """
-    llm = get_llm()
+    llm = get_llm(generation_parameters=generation_parameters)
     
     # Join all valid contexts
     combined_context = "\n\n---\n\n".join(judge_explanations)

@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 
 
 
-def process_single_query(query: str, query_id: str) -> Optional[data_models.PipelineOutcome]:
+def process_single_query(
+    query: str, 
+    query_id: str, 
+    generation_parameters: Optional[Any] = None) -> Optional[data_models.PipelineOutcome]:
     """
     Executes the multi-agent DAG for a single query.
     Returns the textual outputs for all embedded nodes using the Pydantic model.
@@ -40,7 +43,7 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
         logger.info("Running researcher...")
         # Agent 2: Researcher (Modular State-Machine Workflow)
         with tracer.span(trace, name="agent_2_researcher", input=query):
-            researcher_data = run_researcher(query, node_order=0)
+            researcher_data = run_researcher(query, node_order=0, generation_parameters=generation_parameters)
         extracted_docs = researcher_data.outcome
 
         nodes.append(researcher_data)
@@ -49,7 +52,7 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
         logger.info("Running distractor...")        
         start = time.perf_counter()
         with tracer.span(trace, name="agent_3_distractor", input=query):
-            distractor_fact = run_distractor(query)
+            distractor_fact = run_distractor(query, generation_parameters=generation_parameters)
         t_distractor = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=1,
@@ -64,7 +67,7 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
         logger.info("Running judge...")
         start = time.perf_counter()
         with tracer.span(trace, name="agent_4_judge_docs", input={"query": query, "context": extracted_docs}):
-            judge_xml_docs, parsed_docs = run_judge(query, extracted_docs)
+            judge_xml_docs, parsed_docs = run_judge(query, extracted_docs, generation_parameters=generation_parameters)
         t_judge1 = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=2,
@@ -79,7 +82,7 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
         logger.info("Running judge...")
         start = time.perf_counter()
         with tracer.span(trace, name="agent_4_judge_distractor", input={"query": query, "context": distractor_fact}):
-            judge_xml_distractor, parsed_distractor = run_judge(query, distractor_fact)
+            judge_xml_distractor, parsed_distractor = run_judge(query, distractor_fact, generation_parameters=generation_parameters)
         t_judge2 = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=3,
@@ -101,7 +104,7 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
             
         start = time.perf_counter()
         with tracer.span(trace, name="agent_5_final", input={"query": query, "contexts": valid_explanations}):
-            final_answer = run_synthesizer(query, valid_explanations)
+            final_answer = run_synthesizer(query, valid_explanations, generation_parameters=generation_parameters)
         t_synth = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=4,
@@ -147,6 +150,7 @@ class WorkerFunctionArgs(NamedTuple):
     log_folder: Path
     chunk_idx: int
     server_config: LocalServerConfig
+    generation_parameters: Optional[Any] = None
 
 
 class WorkerEnvelope(NamedTuple):
@@ -165,7 +169,7 @@ def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
     start_local_server(config=args.server_config)
     logger.info("The server is ready.")
 
-    result = process_single_query(args.query, args.query_id) 
+    result = process_single_query(args.query, args.query_id, args.generation_parameters) 
     # Save results for each query in the chunk
     path_file = args.log_folder / "outcomes" /  f"{args.query_id}_result.pkl"
     if result is not None:
@@ -195,6 +199,7 @@ def run_orchestration(
     queries: List[str], 
     hpc_config: SubmititSystemConfig, 
     local_server_config: LocalServerConfig,
+    generation_parameters: Optional[Any] = None,
     profile_names: Optional[List[str]] = None) -> List[Any]:
     """
     Uses submitit to dispatch tasks across one or multiple heterogeneous SLURM partitions.
@@ -221,6 +226,7 @@ def run_orchestration(
                 log_folder=log_folder,
                 chunk_idx=chunk_idx,
                 server_config=local_server_config,
+                generation_parameters=generation_parameters,
             )
             all_results.append(main_worker(_worker_func_args))
         return all_results
@@ -289,7 +295,8 @@ def run_orchestration(
                         query_id=_query_id,
                         log_folder=log_folder,
                         chunk_idx=chunk_idx,
-                        server_config=local_server_config
+                        server_config=local_server_config,
+                        generation_parameters=generation_parameters
                     )
                     job = executor.submit(main_worker, _worker_func_args)
                     all_jobs.append(job)

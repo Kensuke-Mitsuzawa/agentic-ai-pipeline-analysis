@@ -4,7 +4,7 @@ import sys
 import logging
 import tomllib
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv, find_dotenv
 
 # Early loading of dotenv so that env vars like HF_HOME are set before HF libraries are imported
@@ -20,6 +20,7 @@ from agentic_ai_analysis.core.local_server import (
     LocalServerConfig,
     LLMClientConfig
 )
+from agentic_ai_analysis.core.llm_client import LlmGenerationParameters
 
 
 logger = logging.getLogger()
@@ -29,6 +30,7 @@ class InterfaceJobConfig(BaseModel):
     submitit_system: SubmititSystemConfig
     local_server: LocalServerConfig
     llm_client: LLMClientConfig
+    llm_generation_params: LlmGenerationParameters = Field(default_factory=LlmGenerationParameters)
 
 
 def start_local_server(server_config: LocalServerConfig):
@@ -103,7 +105,8 @@ def main():
         queries=queries, 
         output_dir=output_dir, 
         hpc_config=hpc_config, 
-        server_config=job_config.local_server
+        server_config=job_config.local_server,
+        generation_parameters=job_config.llm_generation_params
     )
     # end try
     logger.info("Pipeline completed successfully.")

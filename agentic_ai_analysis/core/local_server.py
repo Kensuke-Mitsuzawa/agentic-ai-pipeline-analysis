@@ -13,9 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 AcceptableLLMs = Literal[
+    "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "Qwen/Qwen2.5-7B-Instruct",
+    "microsoft/Phi-3.5-mini-instruct",
+    "mistralai/Mistral-Nemo-Instruct-2407",
     "mistralai/Mistral-7B-Instruct-v0.2",
-    "Qwen/Qwen3.5-27B-FP8", 
-    "Qwen/Qwen3.5-14B", 
     "default"
 ]
 
@@ -25,12 +27,17 @@ class LLMClientConfig(BaseModel):
 
 
 class LocalServerConfig(BaseModel):
-    model_id: AcceptableLLMs = "mistralai/Mistral-7B-Instruct-v0.2"
+    model_id: AcceptableLLMs = "Qwen/Qwen2.5-7B-Instruct"
     port: int = 8000
     host: str = "127.0.0.1"
-    # We store the config as a dictionary to avoid Pydantic validation issues with the transformers object
-    # In practice this should be a dictionary representing the kwargs for BitsAndBytesConfig
-    quantization_config_dict: Optional[Dict[str, Any]] = None
+    # Default 4-bit quantization configuration for optimized local inference
+    quantization_config_dict: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "load_in_4bit": True,
+            "bnb_4bit_compute_dtype": "float16",
+            "bnb_4bit_quant_type": "nf4"
+        }
+    )
 
 # Global pipeline instance for the worker process
 _pipeline = None

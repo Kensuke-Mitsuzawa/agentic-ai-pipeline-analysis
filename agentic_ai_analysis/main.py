@@ -38,6 +38,7 @@ def run_evaluation_pipeline(
     hpc_config: SubmititSystemConfig,
     output_dir: Path,
     server_config: Optional[LocalServerConfig] = None,
+    generation_parameters: Optional[Any] = None,
     evaluation_sampling_rate: float = 0.0,
     compute_cka: bool = False,
 ):
@@ -58,7 +59,8 @@ def run_evaluation_pipeline(
         _seq_worker_envelopes = run_orchestration(
             queries, 
             hpc_config=hpc_config,
-            local_server_config=server_config)
+            local_server_config=server_config,
+            generation_parameters=generation_parameters)
         _n_total_tasks = len(_seq_worker_envelopes)
         _n_success_tasks = sum([1 for _env in _seq_worker_envelopes if _env.job_status == "success"])
         _n_failed_tasks = _n_total_tasks - _n_success_tasks

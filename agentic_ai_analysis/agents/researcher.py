@@ -1,7 +1,7 @@
 import logging
 import time
 import json
-from typing import Dict, Any, List, TypedDict
+from typing import Dict, Any, List, TypedDict, Optional
 
 from langchain_core.prompts import PromptTemplate
 from agentic_ai_analysis.core.llm_client import get_llm
@@ -30,7 +30,8 @@ class ResearcherState(TypedDict):
 def run_researcher(
     user_query: str,
     node_order: int = 0, 
-    max_depth: int = 3) -> ResearcherNodeOutcome:
+    max_depth: int = 3,
+    generation_parameters: Optional[Any] = None) -> ResearcherNodeOutcome:
     """
     Agent 2: Modular State-Machine Researcher.
     Uses Nodes A (Retriever), B (Filter), C (Judge) to iteratively
@@ -39,7 +40,7 @@ def run_researcher(
     node_order_inner = 0
 
     start_time = time.perf_counter()
-    llm = get_llm()
+    llm = get_llm(generation_parameters=generation_parameters)
     arxiv_tool = ArxivQueryRun()
 
     # Initial Extraction (replaces standalone extract_keywords)
