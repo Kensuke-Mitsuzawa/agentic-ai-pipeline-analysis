@@ -47,7 +47,39 @@ class EnvConfig(BaseModel):
             LANGFUSE_PUBLIC_KEY=os.getenv("LANGFUSE_PUBLIC_KEY"),
             LANGFUSE_SECRET_KEY=os.getenv("LANGFUSE_SECRET_KEY"),
             LANGFUSE_HOST=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
-        )
+        ).validate_connection()
+
+    def validate_connection(self) -> "EnvConfig":
+        """Verifies connection to Langfuse if enabled."""
+        if not self.langfuse_enabled:
+            return self
+            
+        try:
+            from langfuse import Langfuse
+            if not self.langfuse_public_key or not self.langfuse_secret_key:
+                raise ValueError("Langfuse is enabled but keys are missing in environment.")
+                
+            client = Langfuse(
+                public_key=self.langfuse_public_key.get_secret_value(),
+                secret_key=self.langfuse_secret_key.get_secret_value(),
+                host=self.langfuse_host
+            )
+            
+            # auth_check() is the official way to verify connection and keys
+            if client.auth_check():
+                return self
+            else:
+                raise ValueError(f"Authentication failed for Langfuse at {self.langfuse_host}")
+        except ImportError:
+            # If langfuse is not installed, we can't verify, but we shouldn't break 
+            # unless the user explicitly wants strict enforcement.
+            return self
+        except Exception as e:
+            # We raise a warning but return self to allow the app to potentially 
+            # continue if tracing is not mission-critical.
+            import logging
+            logging.getLogger().warning(f"Langfuse connection check failed: {e}")
+            return self
 
     def to_langfuse_dict(self) -> dict:
         """Returns a dictionary suitable for initializing Langfuse client."""

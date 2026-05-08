@@ -19,7 +19,7 @@ _early_parser = argparse.ArgumentParser(add_help=False)
 _early_parser.add_argument('-e', '--env_file', type=str, default='.env')
 _early_args, _ = _early_parser.parse_known_args()
 load_dotenv(_early_args.env_file, override=True)
-print(f"HF_HOME: {os.environ.get('HF_HOME')}")
+print(f"loading env file from {_early_args.env_file}")
 from agentic_ai_analysis.env_object import EnvConfig
 env_config = EnvConfig.load(_early_args.env_file)
 
@@ -31,10 +31,17 @@ from agentic_ai_analysis.core.local_server import LocalServerConfig, LLMClientCo
 logger = logging.getLogger()
 
 
+class LLMOpsEvaluationConfig(BaseModel):
+    sampling_rate_evaluation: float = Field(default=1.0, description="Sampling rate for evaluation", ge=0.0, le=1.0)
+    compute_cka: bool = Field(default=False, description="Compute CKA metric")
+    
+
+
 class InterfaceJobConfig(BaseModel):
     submitit_system: SubmititSystemConfig
     llm_client: LLMClientConfig
     local_server: ty.Optional[LocalServerConfig] = Field(default=None)
+    llm_ops_evaluation: LLMOpsEvaluationConfig = Field(default=LLMOpsEvaluationConfig())
 
 
 def maybe_start_local_server(server_config: ty.Optional[LocalServerConfig]) -> bool:
@@ -114,7 +121,9 @@ def main():
         queries=queries, 
         output_dir=output_dir, 
         hpc_config=hpc_config, 
-        server_config=job_config.local_server if started_local else None
+        server_config=job_config.local_server if started_local else None,
+        evaluation_sampling_rate=job_config.llm_ops_evaluation.sampling_rate_evaluation,
+        compute_cka=job_config.llm_ops_evaluation.compute_cka,
     )
     # end try
     logger.info("Pipeline completed successfully.")

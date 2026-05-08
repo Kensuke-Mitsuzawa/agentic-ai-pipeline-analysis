@@ -86,6 +86,9 @@ def run_evaluation_pipeline(
             for o in pipeline_objects:
                 trace = tracer.start_trace(trace_id=o.query_id, name="rag_pipeline", input="", metadata={})
                 tracer.score(trace, name="cka_mean", value=cka_mean)
+        
+        # Ensure all traces are sent to the server
+        get_tracer().flush()
 
         return pipeline_objects
     except Exception as e:
