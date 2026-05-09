@@ -1,0 +1,3 @@
+model_id = "microsoft/Phi-3.5-mini-instruct"
+port = 8000
+host = "0.0.0.0"

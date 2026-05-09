@@ -2,19 +2,21 @@ import logging
 import argparse
 from typing import List
 from pathlib import Path
+import os
 
 from agentic_ai_analysis.main import run_evaluation_pipeline
 from agentic_ai_analysis.core.local_server import LocalServerConfig
-from agentic_ai_analysis.core.configs_hpc import SlurmSystemConfig, SlurmProfile
+from agentic_ai_analysis.core.configs_hpc import SubmititSystemConfig, SubmititProfile
+from agentic_ai_analysis.agents.data_models import PromptContext
 
 logger = logging.getLogger(__name__)
 
 def load_mini_dataset(n: int = 10) -> List[str]:
     """
-    Mocking a HuggingFace ArxivQA dataset load for local prototype.
+    Mocking a generic QA dataset load for local prototype.
     In real HPC deployment, this uses `datasets.load_dataset`.
     """
-    return [
+    raw_questions = [
         "What are the recent advancements in quantum error correction?",
         "Can you explain the difference between LoRA and QLoRA for LLM fine-tuning?",
         "How do transformers handle long context windows efficiently?",
@@ -25,7 +27,17 @@ def load_mini_dataset(n: int = 10) -> List[str]:
         "Explain the mechanism of flash attention.",
         "How does federated learning ensure data privacy?",
         "What is the state-of-the-art in text-to-video generation?"
-    ][:n]
+    ]
+    
+    queries = []
+    for q in raw_questions[:n]:
+        context = PromptContext(
+            context_id="Quantum_error_correction" if "quantum" in q.lower() else None,
+            options=["Option A", "Option B"] if "quantum" in q.lower() else None,
+            question=q
+        )
+        queries.append(context.model_dump_json())
+    return queries
 
 def test_mini_dataset():
     """Test mode 1: Test with the input from `load_mini_dataset()`"""
@@ -34,27 +46,24 @@ def test_mini_dataset():
     output_dir = Path("./pipeline_outcomes_mini")
     
     server_config = LocalServerConfig(
-        model_id="Qwen/Qwen2.5-3B-Instruct", # Super small model for fast test bootup
+        model_id="dummy",
         port=8000,
-        quantization_config_dict=dict(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype="float16")
+        quantization_config_dict=None,
     )
 
-    hpc_config = SlurmSystemConfig(
+    hpc_config = SubmititSystemConfig(
         log_folder=Path("./pipeline_outcomes_mini"),
         default_profile="local",
         profiles={
-            "local": SlurmProfile(
+            "local": SubmititProfile(
                 partition="dev",
                 time="00:10:00",
                 n_nodes_budget=1,
                 n_tasks_per_node=1,
                 n_cpus_per_task=1,
-                n_gpus_per_task=1,
-                gres="gpu:1",
-                mem_per_gpu="16G",
+                n_gpus_per_task=0,
+                gres=None,
+                mem_per_gpu="1G",
             )
         }
     )
@@ -70,39 +79,61 @@ def test_mini_dataset():
         assert r.success is True, f"Query {r.query_id} failed with error: {r.error}"
 
 def test_hf_dataset(n_samples: int = 15):
-    """Test mode 2: Test with the input from the Hugging face dataset MMInstruction/ArxivQA"""
+    """Test mode 2: Test with the input from the Hugging face dataset ai2_arc"""
+    if os.environ.get("RUN_HF_DATASET_TEST") != "1":
+        # This test requires HF datasets cache/network access on the host machine.
+        # Keep it opt-in so the default test suite is offline-friendly.
+        return
     try:
         from datasets import load_dataset
     except ImportError:
         logger.error("The 'datasets' package is required for this mode. Install via 'pip install datasets'.")
         return
         
-    logger.info("=== Running Test Mode 2: HuggingFace ArxivQA ===")
+    logger.info("=== Running Test Mode 2: HuggingFace sciq ===")
     logger.info("Loading dataset from HuggingFace...")
-    dataset = load_dataset("MMInstruction/ArxivQA", split="train")
+    dataset = load_dataset("sciq", split="test")
     
-    # We use the 'question' column from the dataset as the query
-    queries = dataset["question"][:n_samples]
+    # We construct PromptContext for each sample
+    queries = []
+    subset = dataset.select(range(min(n_samples, len(dataset))))
+    for item in subset:
+        # SciQ has distractor1, distractor2, distractor3 and correct_answer
+        options = [
+            item.get("correct_answer", ""),
+            item.get("distractor1", ""),
+            item.get("distractor2", ""),
+            item.get("distractor3", "")
+        ]
+        options = [o for o in options if o]
+        import hashlib
+        question = item.get("question", "")
+        context = PromptContext(
+            context_id=hashlib.md5(question.encode()).hexdigest()[:10],
+            options=options,
+            question=question
+        )
+        queries.append(context.model_dump_json())
     output_dir = Path("./pipeline_outcomes_hf")
     
     server_config = LocalServerConfig(
-        model_id="Qwen/Qwen2.5-3B-Instruct", # Super small model for fast test bootup
+        model_id="dummy",
         port=8000
     )
 
-    hpc_config = SlurmSystemConfig(
+    hpc_config = SubmititSystemConfig(
         log_folder=Path("./pipeline_outcomes_hf"),
         default_profile="local",
         profiles={
-            "local": SlurmProfile(
+            "local": SubmititProfile(
                 partition="dev",
                 time="00:10:00",
                 n_nodes_budget=1,
                 n_tasks_per_node=1,
                 n_cpus_per_task=1,
-                n_gpus_per_task=1,
-                gres="gpu:1",
-                mem_per_gpu="16G",
+                n_gpus_per_task=0,
+                gres=None,
+                mem_per_gpu="1G",
             )
         }
     )
@@ -116,13 +147,6 @@ def test_hf_dataset(n_samples: int = 15):
         assert r.success is True, f"Query {r.query_id} failed with error: {r.error}"
 
 if __name__ == "__main__":
-    # parser = argparse.ArgumentParser(description="Run the Agentic AI CKA Analysis Pipeline")
-    # parser.add_argument("--mode", type=str, choices=["mini", "hf"], default="mini", 
-    #                     help="Test mode to run: 'mini' for local mock data or 'hf' for HuggingFace ArxivQA dataset.")
-    # parser.add_argument("--n_samples", type=int, default=15, 
-    #                     help="Number of samples to run when using the 'hf' mode.")
-    # args = parser.parse_args()
-    
     # Configure root logger to output INFO to console, and DEBUG to a file
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
@@ -144,8 +168,3 @@ if __name__ == "__main__":
     root_logger.addHandler(file_handler)
     
     test_mini_dataset()
-    
-    # if args.mode == "mini":
-    #     test_mini_dataset()
-    # elif args.mode == "hf":
-    #     test_hf_dataset(n_samples=args.n_samples)

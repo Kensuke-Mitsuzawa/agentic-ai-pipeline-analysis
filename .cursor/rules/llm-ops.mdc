@@ -1,0 +1,14 @@
+---
+description: Standards for LLMOps and RAG Evaluation
+globs: ["**/agentic_ai_analysis/llm_ops", "**/tests/**"]
+---
+
+# LLMOps Toolchain
+Use these specific packages for all evaluation and tracing:
+- **Langfuse:** ON-PREMISE ONLY. Use the local host configuration.
+- **DeepEval:** For unit testing LLM outputs.
+- **Ragas / Open-RAG-Eval:** For RAG pipeline metrics.
+
+# Rules
+- Every API call must be wrapped in a Langfuse trace.
+- All RAG pipelines must have a corresponding DeepEval test case.

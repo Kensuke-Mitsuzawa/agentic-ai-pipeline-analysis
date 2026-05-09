@@ -30,6 +30,11 @@ def get_llm(
     # Alternatively, if serving via OpenAI compatible endpoints (vLLM):
     from langchain_openai import ChatOpenAI
     
+    # Allow environment override so interface scripts can switch endpoints/models
+    # without editing code (e.g., when using port-forward to a remote machine).
+    base_url = os.environ.get("OPENAI_API_BASE", base_url)
+    model = os.environ.get("OPENAI_MODEL", model)
+
     # We use ChatOpenAI pointing to the local vLLM server since it exposes standard API
     llm = ChatOpenAI(
         model=model,
@@ -40,7 +45,8 @@ def get_llm(
         frequency_penalty=generation_parameters.frequency_penalty,
         stop=generation_parameters.stop,
         openai_api_key="EMPTY",  # Local endpoint doesn't need key
-        openai_api_base=base_url
+        openai_api_base=base_url,
+        timeout=60, # Add timeout to prevent freezing
     )
     return llm
 
@@ -50,3 +56,26 @@ def get_embeddings(model_name="sentence-transformers/all-MiniLM-L6-v2"):
     """
     embeddings = HuggingFaceEmbeddings(model_name=model_name)
     return embeddings
+
+
+def resolve_model_name(base_url: str, model_name: str) -> str:
+    """
+    Resolves the model name by querying the server if 'default' is provided.
+    """
+    if model_name != "default":
+        return model_name
+        
+    try:
+        import requests
+        # Try OpenAI-compatible models list
+        url = base_url.rstrip("/") + "/models"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            # Usually returns a list of models, pick the first one
+            if "data" in data and len(data["data"]) > 0:
+                return data["data"][0]["id"]
+    except Exception:
+        pass
+        
+    return model_name

@@ -11,31 +11,59 @@ from typing import Dict, Any, List, Optional, NamedTuple, Union, Optional
 
 # Agent imports
 from ..agents import data_models
+from ..agents.data_models import PromptContext
 from agentic_ai_analysis.agents.researcher import run_researcher
 from agentic_ai_analysis.agents.distractor import run_distractor
 from agentic_ai_analysis.agents.judge import run_judge
 from agentic_ai_analysis.agents.synthesizer import run_synthesizer
 
 from .local_server import start_local_server, stop_local_server, LocalServerConfig
-from .configs_hpc import SlurmSystemConfig
+from .configs_hpc import SubmititSystemConfig
 import math
+from agentic_ai_analysis.llm_ops.langfuse_tracing import get_tracer
 
 
 logger = logging.getLogger(__name__)
 
 
 
-def process_single_query(query: str, query_id: str) -> Optional[data_models.PipelineOutcome]:
+def process_single_query(
+    query: str, 
+    query_id: str, 
+    generation_parameters: Optional[Any] = None) -> Optional[data_models.PipelineOutcome]:
     """
     Executes the multi-agent DAG for a single query.
     Returns the textual outputs for all embedded nodes using the Pydantic model.
     """
     nodes: List[Any] = []
 
+    tracer = get_tracer()
+    trace = tracer.start_trace(trace_id=query_id, name="rag_pipeline", input=query, metadata={})
+    
+    from agentic_ai_analysis.core.llm_client import resolve_model_name
+    base_url = os.environ.get("OPENAI_API_BASE", "http://localhost:8000/v1/")
+    model_name = os.environ.get("OPENAI_MODEL", "local-model")
+    model_name = resolve_model_name(base_url, model_name)
+
+    # Extract the effective question for subsequent agents if the query is a PromptContext JSON
+    try:
+        context = PromptContext.model_validate_json(query)
+        effective_query = context.question
+        if context.options:
+            effective_query += f" Options: {context.options}"
+    except Exception:
+        effective_query = query
+
+    gen_params_dict = generation_parameters.model_dump() if generation_parameters and hasattr(generation_parameters, "model_dump") else {}
+
     try:
         logger.info("Running researcher...")
         # Agent 2: Researcher (Modular State-Machine Workflow)
-        researcher_data = run_researcher(query, node_order=0)
+        # Researcher handles the structured JSON itself to get context IDs
+        with tracer.generation(trace, name="agent_2_researcher", model=model_name, input=query, model_parameters=gen_params_dict) as s:
+            researcher_data = run_researcher(query, node_order=0, generation_parameters=generation_parameters)
+            if s:
+                s.update(output=researcher_data.outcome)
         extracted_docs = researcher_data.outcome
 
         nodes.append(researcher_data)
@@ -43,13 +71,16 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
         # Agent 3: Distractor
         logger.info("Running distractor...")        
         start = time.perf_counter()
-        distractor_fact = run_distractor(query)
+        with tracer.generation(trace, name="agent_3_distractor", model=model_name, input=effective_query, model_parameters=gen_params_dict) as s:
+            distractor_fact = run_distractor(effective_query, generation_parameters=generation_parameters)
+            if s:
+                s.update(output=distractor_fact)
         t_distractor = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=1,
             node_name="agent_3_distractor",
             execution_time_seconds=t_distractor,
-            input=query,
+            input=effective_query,
             outcome=distractor_fact,
             args={}
         ))
@@ -57,7 +88,10 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
         # Agent 4: Judge (Evaluate 1) On retrieved context
         logger.info("Running judge...")
         start = time.perf_counter()
-        judge_xml_docs, parsed_docs = run_judge(query, extracted_docs)
+        with tracer.generation(trace, name="agent_4_judge_docs", model=model_name, input={"query": effective_query, "context": extracted_docs}, model_parameters=gen_params_dict) as s:
+            judge_xml_docs, parsed_docs = run_judge(effective_query, extracted_docs, generation_parameters=generation_parameters)
+            if s:
+                s.update(output=judge_xml_docs)
         t_judge1 = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=2,
@@ -71,7 +105,10 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
         # Agent 4: Judge (Evaluate 2) On distractor context
         logger.info("Running judge...")
         start = time.perf_counter()
-        judge_xml_distractor, parsed_distractor = run_judge(query, distractor_fact)
+        with tracer.generation(trace, name="agent_4_judge_distractor", model=model_name, input={"query": effective_query, "context": distractor_fact}, model_parameters=gen_params_dict) as s:
+            judge_xml_distractor, parsed_distractor = run_judge(effective_query, distractor_fact, generation_parameters=generation_parameters)
+            if s:
+                s.update(output=judge_xml_distractor)
         t_judge2 = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=3,
@@ -92,7 +129,10 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
             valid_explanations.append(parsed_distractor["explanation"])
             
         start = time.perf_counter()
-        final_answer = run_synthesizer(query, valid_explanations)
+        with tracer.generation(trace, name="agent_5_final", model=model_name, input={"query": effective_query, "contexts": valid_explanations}, model_parameters=gen_params_dict) as s:
+            final_answer = run_synthesizer(effective_query, valid_explanations, generation_parameters=generation_parameters)
+            if s:
+                s.update(output=final_answer)
         t_synth = time.perf_counter() - start
         nodes.append(data_models.BaseNodeOutcome(
             node_order=4,
@@ -103,7 +143,7 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
             args={}
         ))
         
-        return data_models.PipelineOutcome(
+        outcome = data_models.PipelineOutcome(
             prompt=query,
             query_id=query_id,
             final_outcome=final_answer,
@@ -111,10 +151,14 @@ def process_single_query(query: str, query_id: str) -> Optional[data_models.Pipe
             error=None,
             nodes={n.node_name: n for n in nodes}
         )
+        tracer.update_trace(trace, output=final_answer)
+        tracer.score(trace, name="pipeline_success", value=1.0)
+        return outcome
         
     except Exception as e:
         err_str = f"Error querying LLM: {str(e)}"
         logger.error(err_str)
+        tracer.score(trace, name="pipeline_success", value=0.0, comment=err_str)
 
         return None
 
@@ -134,7 +178,8 @@ class WorkerFunctionArgs(NamedTuple):
     query_id: str
     log_folder: Path
     chunk_idx: int
-    server_config: LocalServerConfig
+    server_config: Optional[LocalServerConfig]
+    generation_parameters: Optional[Any] = None
 
 
 class WorkerEnvelope(NamedTuple):
@@ -149,11 +194,12 @@ def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
     logger = logging.getLogger(__name__)
     logger.info(f"Processing query {args.query_id}: {args.query}")
 
-    logger.info("Starting a server...")
-    start_local_server(config=args.server_config)
-    logger.info("The server is ready.")
+    if args.server_config is not None:
+        logger.info("Starting a local server...")
+        start_local_server(config=args.server_config)
+        logger.info("The local server is ready.")
 
-    result = process_single_query(args.query, args.query_id) 
+    result = process_single_query(args.query, args.query_id, args.generation_parameters) 
     # Save results for each query in the chunk
     path_file = args.log_folder / "outcomes" /  f"{args.query_id}_result.pkl"
     if result is not None:
@@ -173,16 +219,18 @@ def main_worker(args: WorkerFunctionArgs) -> WorkerEnvelope:
         )
     # end if
 
-    logger.info("Stopping local LLM server...")
-    stop_local_server()
+    if args.server_config is not None:
+        logger.info("Stopping local LLM server...")
+        stop_local_server()
 
     return envelope_obj
 
 
 def run_orchestration(
     queries: List[str], 
-    hpc_config: SlurmSystemConfig, 
-    local_server_config: LocalServerConfig,
+    hpc_config: SubmititSystemConfig, 
+    local_server_config: Optional[LocalServerConfig],
+    generation_parameters: Optional[Any] = None,
     profile_names: Optional[List[str]] = None) -> List[Any]:
     """
     Uses submitit to dispatch tasks across one or multiple heterogeneous SLURM partitions.
@@ -196,6 +244,23 @@ def run_orchestration(
     # end
 
     profiles = [hpc_config.profiles[p] for p in profile_names]
+
+    # Local fallback for CPU dev/test environments (no Slurm required).
+    # If the selected profiles are exactly ["local"], run sequentially in-process.
+    if profile_names == ["local"]:
+        all_results: list[WorkerEnvelope] = []
+        for chunk_idx, q in enumerate(queries):
+            _query_id = hashlib.sha256(q.encode("utf-8")).hexdigest()
+            _worker_func_args = WorkerFunctionArgs(
+                query=q,
+                query_id=_query_id,
+                log_folder=log_folder,
+                chunk_idx=chunk_idx,
+                server_config=local_server_config,
+                generation_parameters=generation_parameters,
+            )
+            all_results.append(main_worker(_worker_func_args))
+        return all_results
 
     # 1. Distribute queries proportionally across the chosen profiles based on node budget
     total_budget = sum(p.n_nodes_budget for p in profiles)
@@ -261,7 +326,8 @@ def run_orchestration(
                         query_id=_query_id,
                         log_folder=log_folder,
                         chunk_idx=chunk_idx,
-                        server_config=local_server_config
+                        server_config=local_server_config,
+                        generation_parameters=generation_parameters
                     )
                     job = executor.submit(main_worker, _worker_func_args)
                     all_jobs.append(job)

@@ -41,13 +41,15 @@ def parse_xml(xml_text: str) -> Dict[str, Any]:
             "explanation": f"XML parsing failed: {str(e)}\nRaw Response: {xml_text}"
         }
 
-def run_judge(original_prompt: str, context: str) -> Tuple[str, Dict[str, Any]]:
+from typing import Dict, Any, Tuple, Optional
+
+def run_judge(original_prompt: str, context: str, generation_parameters: Optional[Any] = None) -> Tuple[str, Dict[str, Any]]:
     """
     Agent 4: Judge / Context Filter.
     Evaluates whether the provided context is relevant to the original prompt.
     Returns the raw XML response (for embedding) and the parsed results.
     """
-    llm = get_llm()
+    llm = get_llm(generation_parameters=generation_parameters)
     
     template = """You are a Judge Agent evaluating context retrieved for a query.
 Evaluate whether the following context is highly related and useful for answering the prompt.

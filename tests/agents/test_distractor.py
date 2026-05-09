@@ -4,12 +4,9 @@ from agentic_ai_analysis.core.local_server import LocalServerConfig, start_local
 
 def test_distractor():
     server_config = LocalServerConfig(
-        model_id="Qwen/Qwen2.5-3B-Instruct", # Super small model for fast test bootup
+        model_id="dummy",
         port=8000,
-        quantization_config_dict=dict(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype="float16")
+        quantization_config_dict=None,
     )
     start_local_server(server_config)
 

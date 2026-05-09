@@ -1,14 +1,15 @@
 import random
+from typing import Optional, Any
 from ..core.llm_client import get_llm
 from langchain_core.prompts import PromptTemplate
 
-def run_distractor(prompt: str) -> str:
+def run_distractor(prompt: str, generation_parameters: Optional[Any] = None) -> str:
     """
     Agent 3: Noisy/Distractor Agent.
     Intentionally returns an unrelated generic fact.
     This acts as a negative control for the CKA metric.
     """
-    llm = get_llm()
+    llm = get_llm(generation_parameters=generation_parameters)
     
     patterns = [
         "Output a Python code snippet.",
