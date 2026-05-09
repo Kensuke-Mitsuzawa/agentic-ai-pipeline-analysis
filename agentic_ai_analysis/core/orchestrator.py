@@ -40,7 +40,10 @@ def process_single_query(
     tracer = get_tracer()
     trace = tracer.start_trace(trace_id=query_id, name="rag_pipeline", input=query, metadata={})
     
+    from agentic_ai_analysis.core.llm_client import resolve_model_name
+    base_url = os.environ.get("OPENAI_API_BASE", "http://localhost:8000/v1/")
     model_name = os.environ.get("OPENAI_MODEL", "local-model")
+    model_name = resolve_model_name(base_url, model_name)
 
     # Extract the effective question for subsequent agents if the query is a PromptContext JSON
     try:
@@ -51,11 +54,13 @@ def process_single_query(
     except Exception:
         effective_query = query
 
+    gen_params_dict = generation_parameters.model_dump() if generation_parameters and hasattr(generation_parameters, "model_dump") else {}
+
     try:
         logger.info("Running researcher...")
         # Agent 2: Researcher (Modular State-Machine Workflow)
         # Researcher handles the structured JSON itself to get context IDs
-        with tracer.generation(trace, name="agent_2_researcher", model=model_name, input=query) as s:
+        with tracer.generation(trace, name="agent_2_researcher", model=model_name, input=query, model_parameters=gen_params_dict) as s:
             researcher_data = run_researcher(query, node_order=0, generation_parameters=generation_parameters)
             if s:
                 s.update(output=researcher_data.outcome)
@@ -66,7 +71,7 @@ def process_single_query(
         # Agent 3: Distractor
         logger.info("Running distractor...")        
         start = time.perf_counter()
-        with tracer.generation(trace, name="agent_3_distractor", model=model_name, input=effective_query) as s:
+        with tracer.generation(trace, name="agent_3_distractor", model=model_name, input=effective_query, model_parameters=gen_params_dict) as s:
             distractor_fact = run_distractor(effective_query, generation_parameters=generation_parameters)
             if s:
                 s.update(output=distractor_fact)
@@ -83,7 +88,7 @@ def process_single_query(
         # Agent 4: Judge (Evaluate 1) On retrieved context
         logger.info("Running judge...")
         start = time.perf_counter()
-        with tracer.generation(trace, name="agent_4_judge_docs", model=model_name, input={"query": effective_query, "context": extracted_docs}) as s:
+        with tracer.generation(trace, name="agent_4_judge_docs", model=model_name, input={"query": effective_query, "context": extracted_docs}, model_parameters=gen_params_dict) as s:
             judge_xml_docs, parsed_docs = run_judge(effective_query, extracted_docs, generation_parameters=generation_parameters)
             if s:
                 s.update(output=judge_xml_docs)
@@ -100,7 +105,7 @@ def process_single_query(
         # Agent 4: Judge (Evaluate 2) On distractor context
         logger.info("Running judge...")
         start = time.perf_counter()
-        with tracer.generation(trace, name="agent_4_judge_distractor", model=model_name, input={"query": effective_query, "context": distractor_fact}) as s:
+        with tracer.generation(trace, name="agent_4_judge_distractor", model=model_name, input={"query": effective_query, "context": distractor_fact}, model_parameters=gen_params_dict) as s:
             judge_xml_distractor, parsed_distractor = run_judge(effective_query, distractor_fact, generation_parameters=generation_parameters)
             if s:
                 s.update(output=judge_xml_distractor)
@@ -124,7 +129,7 @@ def process_single_query(
             valid_explanations.append(parsed_distractor["explanation"])
             
         start = time.perf_counter()
-        with tracer.generation(trace, name="agent_5_final", model=model_name, input={"query": effective_query, "contexts": valid_explanations}) as s:
+        with tracer.generation(trace, name="agent_5_final", model=model_name, input={"query": effective_query, "contexts": valid_explanations}, model_parameters=gen_params_dict) as s:
             final_answer = run_synthesizer(effective_query, valid_explanations, generation_parameters=generation_parameters)
             if s:
                 s.update(output=final_answer)

@@ -69,7 +69,7 @@ class _NoopTracer:
         yield None
 
     @contextmanager
-    def generation(self, trace: TraceHandle, *, name: str, model: str, input: Any, metadata: Optional[dict] = None) -> Iterator[Any]:
+    def generation(self, trace: TraceHandle, *, name: str, model: str, input: Any, model_parameters: Optional[dict] = None, metadata: Optional[dict] = None) -> Iterator[Any]:
         yield None
 
     def score(self, trace: TraceHandle, *, name: str, value: float, comment: Optional[str] = None) -> None:
@@ -113,11 +113,11 @@ class _LangfuseTracer:
             span.end()
 
     @contextmanager
-    def generation(self, trace: TraceHandle, *, name: str, model: str, input: Any, metadata: Optional[dict] = None) -> Iterator[Any]:
+    def generation(self, trace: TraceHandle, *, name: str, model: str, input: Any, model_parameters: Optional[dict] = None, metadata: Optional[dict] = None) -> Iterator[Any]:
         if trace._trace is None:
             yield None
             return
-        gen = trace._trace.generation(name=name, model=model, input=input, metadata=metadata or {})
+        gen = trace._trace.generation(name=name, model=model, input=input, model_parameters=model_parameters or {}, metadata=metadata or {})
         try:
             yield gen
         except Exception as e:

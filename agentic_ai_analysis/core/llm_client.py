@@ -56,3 +56,26 @@ def get_embeddings(model_name="sentence-transformers/all-MiniLM-L6-v2"):
     """
     embeddings = HuggingFaceEmbeddings(model_name=model_name)
     return embeddings
+
+
+def resolve_model_name(base_url: str, model_name: str) -> str:
+    """
+    Resolves the model name by querying the server if 'default' is provided.
+    """
+    if model_name != "default":
+        return model_name
+        
+    try:
+        import requests
+        # Try OpenAI-compatible models list
+        url = base_url.rstrip("/") + "/models"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            # Usually returns a list of models, pick the first one
+            if "data" in data and len(data["data"]) > 0:
+                return data["data"][0]["id"]
+    except Exception:
+        pass
+        
+    return model_name
